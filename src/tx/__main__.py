@@ -7,6 +7,7 @@ import matplotlib.ticker as ticker
 
 from ..common.wav import Wav
 from ..common.utils import plotSignedSamples
+from ..tx.transmitter import Transmitter
 
 #python3 -m src.tx -t samples -i Hellcat44100.wav -o out.wav
 def main():
@@ -17,6 +18,8 @@ def main():
                        help="Path to input file")
    parser.add_argument("-o" ,"--output-file", type=str, required=True,
                        help="Path to output .wav file")
+   parser.add_argument("-m" ,"--modulation-scheme", choices=range(0, 7), default=5,
+                       help="Selects number of subcarriers, modulation type (BPSK or QPSK) and number of pilots")
    
    args = parser.parse_args()
    input_file_path = args.input_file
@@ -27,7 +30,9 @@ def main():
    elif args.input_type == "file":
       tdSamples = np.fromfile(input_file_path, dtype=np.int16)
 
-   
+   transmitter = Transmitter(args.modulation_scheme)
+   tdSamples = transmitter.transmit(tdSamples)
+
    Wav(tdSamples).write(output_file_path)
 
    plotSignedSamples(1000, 300, tdSamples, "txTdSignal.png", 44100)
