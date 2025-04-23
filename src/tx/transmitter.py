@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-pilotValue = np.complex64(1, 0)
+pilotValue = np.complex64(np.sqrt(2), 0)
+nullValue = np.complex64(0, 0)
 
 qpskMap = np.array([
    -0.7071 + 0.7071j, #0x00
@@ -11,9 +12,10 @@ qpskMap = np.array([
 ], dtype=np.complex64)
 
 def calcLpFir(normCutoff, nTaps):
+   assert nTaps % 2 != 0
    n = np.arange(nTaps)
 
-   taps = np.sinc(2 * np.pi * normCutoff * (n - (nTaps - 1) / 2))
+   taps = np.sinc(normCutoff * (n - (nTaps - 1) / 2))
 
    window = np.hamming(nTaps)
    taps *= window
@@ -56,6 +58,12 @@ class Transmitter():
             self.nPilotSubcarriers = 16
             self.nNullSubcarriers = 1
             self.audioSamplesPerSymbol = 8
+         case 6: # 16 pilots, 8 audio samples per symbol
+            self.modulation = "QPSK"
+            self.nDataSubcarriers = 128
+            self.nPilotSubcarriers = 32
+            self.nNullSubcarriers = 1
+            self.audioSamplesPerSymbol = 16
             
       match self.modulation:
          case "QPSK":
@@ -67,7 +75,7 @@ class Transmitter():
       self.dftSize = self.nSubcarriers
       self.cpLen = 20
       self.bw = 14700
-      self.centerFreq = 11000
+      self.centerFreq = 9000
       self.sampleRate = 44100 # = 14700 * 3
 
    def pad(self, samples):
@@ -103,11 +111,12 @@ class Transmitter():
                symb[subcIdx] = iqDataSamples[iqIdx] # add NULLLLLLLLLLLLLLLLLLLLLLLLLLL
                iqIdx += 1
          pilotIdx = (pilotIdx + 1) % 5 # pilots are shifted by one for each symbol
-         symb = np.insert(symb, len(symb) // 2, np.complex64(0, 0)) # insert null subcarrier
+         symb = np.insert(symb, len(symb) // 2, nullValue) # insert null subcarrier
          #symb = np.pad(symb, (20, 20), constant_values=(np.complex64(0, 0), np.complex64(0, 0)))
          #plt.plot(np.abs(symb))
          #plt.savefig("symb.png")
          #plt.close()
+         symb = np.fft.ifftshift(symb)
          tdSymb = np.fft.ifft(symb)
          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : symbIdx * (self.dftSize + self.cpLen) + self.cpLen] = tdSymb[-self.cpLen:]
          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) + self.cpLen : (symbIdx + 1) * (self.dftSize + self.cpLen)] = tdSymb[:]
@@ -117,32 +126,28 @@ class Transmitter():
       return tdIqSamples
 
    def resample(self, samples):
-      # upsample x5, filter, downsample x2
-      upsampleFactor = 5
-      downsampleFactor = 2
-      nTaps = 128
+      upsampleFactor = 3
+      downsampleFactor = 1
+      nTaps = 1023
       assert upsampleFactor > downsampleFactor
       assert nTaps <= len(samples)
 
-      if upsampleFactor > 1:
-         upsampled = np.zeros(len(samples) * upsampleFactor, dtype=np.complex64)
-         upsampled[::upsampleFactor] = samples
-         upsampled = lpFilter(upsampled, 1/upsampleFactor, nTaps)
-      else:
-         upsampled = samples
+      upsampled = np.zeros(len(samples) * upsampleFactor, dtype=np.complex64)
+      upsampled[::upsampleFactor] = samples
+      upsampled = lpFilter(upsampled, 1/upsampleFactor, nTaps)
       
       downsampled = upsampled[::downsampleFactor]
       return downsampled
 
    def dac(self, tdIqSamples):
       timeVec = np.arange(len(tdIqSamples)) / self.sampleRate
-      #carrierCos = np.cos(2 * np.pi * self.centerFreq * timeVec)
-      #carrierSin = np.sin(2 * np.pi * self.centerFreq * timeVec)
+      carrierCos = np.cos(2 * np.pi * self.centerFreq * timeVec)
+      carrierSin = np.sin(2 * np.pi * self.centerFreq * timeVec)
 
-      exponent = np.sqrt(2) * np.exp(1j * 2 * np.pi * self.centerFreq * timeVec)
+      #exponent = np.exp(1j * 2 * np.pi * self.centerFreq * timeVec)
 
-      modulatedSamples = np.real(tdIqSamples * exponent)
-      #modulatedSamples = tdIqSamples.real * carrierCos + tdIqSamples.imag * carrierSin
+      #modulatedSamples = np.sqrt(2) * np.real(tdIqSamples * exponent)
+      modulatedSamples = tdIqSamples.real * carrierCos - tdIqSamples.imag * carrierSin
 
       normFactor = np.iinfo(np.int16).max / np.max(np.abs(modulatedSamples))
       modulatedSamples *= normFactor
