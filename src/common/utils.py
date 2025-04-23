@@ -25,7 +25,6 @@ def plotSignedSamples(w, h, samples, path, sampleRate = None):
    plt.figure(1, figsize=(float(w)/DPI, float(h)/DPI), dpi=DPI)
    plt.subplots_adjust(wspace=0, hspace=0)
    axes = plt.subplot(1, 1, 1)
-   axes.set_facecolor("k")
    axes.plot(samples[::k], "g")
    axes.set_xlim(0,len(samples) / k)
    axes.yaxis.set_major_formatter(ticker.FuncFormatter(format_db))

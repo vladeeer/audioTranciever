@@ -18,7 +18,7 @@ def main():
                        help="Path to input file")
    parser.add_argument("-o" ,"--output-file", type=str, required=True,
                        help="Path to output .wav file")
-   parser.add_argument("-m" ,"--modulation-scheme", choices=range(0, 7), default=5,
+   parser.add_argument("-m" ,"--modulation-scheme", type=int, choices=range(0, 7), default=5,
                        help="Selects number of subcarriers, modulation type (BPSK or QPSK) and number of pilots")
    
    args = parser.parse_args()
