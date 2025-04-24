@@ -1,82 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-pilotValue = np.complex64(np.sqrt(2), 0)
-nullValue = np.complex64(0, 0)
-
-qpskMap = np.array([
-   -0.7071 + 0.7071j, #0x00
-    0.7071 + 0.7071j, #0x01
-   -0.7071 - 0.7071j, #0x10
-    0.7071 - 0.7071j, #0x11
-], dtype=np.complex64)
-
-def calcLpFir(normCutoff, nTaps):
-   assert nTaps % 2 != 0
-   n = np.arange(nTaps)
-
-   taps = np.sinc(normCutoff * (n - (nTaps - 1) / 2))
-
-   window = np.hamming(nTaps)
-   taps *= window
-
-   taps /= np.sum(taps)
-   return taps
-
-def lpFilter(samples, normCutoff, nTaps):
-   taps = calcLpFir(normCutoff, nTaps)
-   filteredSamples = np.convolve(samples, taps, mode='same')
-   return filteredSamples
+from ..common.params import pilotValue, nullValue, getModeParams, getModulationParams, getConsts
+from ..common.filter import lpFilter
 
 class Transmitter():
-   def __init__(self, modulationScheme):
-      match modulationScheme:
-         # case 0: # 4 pilots, 1 audio sample per symbol
-         #    self.modulation = "BPSK"
-         #    self.nSubcarriers = 20
-         # case 1: # 8 pilots, 2 audio samples per symbol
-         #    self.modulation = "BPSK"
-         #    self.nSubcarriers = 40
-         # case 2: # 16 pilots, 4 audio samples per symbol
-         #    self.modulation = "BPSK"
-         #    self.nSubcarriers = 80
-         case 3: # 4 pilots, 2 audio samples per symbol
-            self.modulation = "QPSK"
-            self.nDataSubcarriers = 16
-            self.nPilotSubcarriers = 4
-            self.nNullSubcarriers = 1
-            self.audioSamplesPerSymbol = 2
-         case 4: # 8 pilots, 4 audio samples per symbol
-            self.modulation = "QPSK"
-            self.nDataSubcarriers = 32
-            self.nPilotSubcarriers = 8
-            self.nNullSubcarriers = 1
-            self.audioSamplesPerSymbol = 4
-         case 5: # 16 pilots, 8 audio samples per symbol
-            self.modulation = "QPSK"
-            self.nDataSubcarriers = 64
-            self.nPilotSubcarriers = 16
-            self.nNullSubcarriers = 1
-            self.audioSamplesPerSymbol = 8
-         case 6: # 16 pilots, 8 audio samples per symbol
-            self.modulation = "QPSK"
-            self.nDataSubcarriers = 128
-            self.nPilotSubcarriers = 32
-            self.nNullSubcarriers = 1
-            self.audioSamplesPerSymbol = 16
-            
-      match self.modulation:
-         case "QPSK":
-            self.modulationMap = qpskMap
-            self.bitsPerElement = 2
-
-      #self.symbolsPerFrame = 10 #???
-      self.nSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers + self.nNullSubcarriers
-      self.dftSize = self.nSubcarriers
-      self.cpLen = 20
-      self.bw = 14700
-      self.centerFreq = 9000
-      self.sampleRate = 44100 # = 14700 * 3
+   def __init__(self, mode):
+      getConsts(self)
+      getModeParams(self, mode)
+      getModulationParams(self, self.modulation)
 
    def pad(self, samples):
       suffixLen = (self.audioSamplesPerSymbol - len(samples) % self.audioSamplesPerSymbol) % self.audioSamplesPerSymbol
@@ -87,7 +19,7 @@ class Transmitter():
       iqSamples = np.zeros(iqSamplesPerSample * len(samples), dtype=np.complex64)
       for sampleIdx, sample in enumerate(samples):
          for elementIdx in range(iqSamplesPerSample):
-            bits = sample & 0x0003
+            bits = sample & self.modulationBitMask
             sample = sample >> self.bitsPerElement
             iqSamples[sampleIdx * iqSamplesPerSample + elementIdx] = self.modulationMap[bits]
          #print(f'{iqSamples[sampleIdx * iqSamplesPerSample]}{iqSamples[sampleIdx * iqSamplesPerSample + 1]}{iqSamples[sampleIdx * iqSamplesPerSample + 2]}{iqSamples[sampleIdx * iqSamplesPerSample + 3]}{iqSamples[sampleIdx * iqSamplesPerSample + 4]}{iqSamples[sampleIdx * iqSamplesPerSample + 5]}{iqSamples[sampleIdx * iqSamplesPerSample + 6]}{iqSamples[sampleIdx * iqSamplesPerSample + 7]}')
@@ -116,14 +48,13 @@ class Transmitter():
          #plt.plot(np.abs(symb))
          #plt.savefig("symb.png")
          #plt.close()
-         symb = np.fft.ifftshift(symb)
-         tdSymb = np.fft.ifft(symb)
+         tdSymb = np.fft.ifft(np.fft.ifftshift(symb))
          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : symbIdx * (self.dftSize + self.cpLen) + self.cpLen] = tdSymb[-self.cpLen:]
          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) + self.cpLen : (symbIdx + 1) * (self.dftSize + self.cpLen)] = tdSymb[:]
          #plt.plot(np.abs(tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : (symbIdx + 1) * (self.dftSize + self.cpLen)]))
          #plt.savefig(f"tdSymb/tdSymb{symbIdx}.png")
          #plt.close()
-      return tdIqSamples
+      return (tdIqSamples, nSymbols)
 
    def resample(self, samples):
       upsampleFactor = 3
@@ -139,19 +70,16 @@ class Transmitter():
       downsampled = upsampled[::downsampleFactor]
       return downsampled
 
-   def dac(self, tdIqSamples):
+   def iqDac(self, tdIqSamples):
       timeVec = np.arange(len(tdIqSamples)) / self.sampleRate
-      carrierCos = np.cos(2 * np.pi * self.centerFreq * timeVec)
-      carrierSin = np.sin(2 * np.pi * self.centerFreq * timeVec)
+      exponent = np.sqrt(2) * np.exp(1j * 2 * np.pi * self.centerFreq * timeVec)
+      modulatedSamples = np.real(tdIqSamples * exponent)
 
-      #exponent = np.exp(1j * 2 * np.pi * self.centerFreq * timeVec)
-
-      #modulatedSamples = np.sqrt(2) * np.real(tdIqSamples * exponent)
-      modulatedSamples = tdIqSamples.real * carrierCos - tdIqSamples.imag * carrierSin
-
+      #percentile = np.percentile(np.abs(modulatedSamples), 99.999)
+      #normFactor = np.iinfo(np.int16).max / percentile
       normFactor = np.iinfo(np.int16).max / np.max(np.abs(modulatedSamples))
       modulatedSamples *= normFactor
-      print(np.average(np.abs(modulatedSamples)))
+      #print(np.average(np.abs(modulatedSamples)))
       return modulatedSamples.astype(np.int16)
 
    def transmit(self, samples):
@@ -162,13 +90,15 @@ class Transmitter():
       iqDataSamples = self.mapSamplesToQPSK(paddedSamples)
 
       print("Calculalating OFDM IQ samples")
-      tdIqSamples = self.mapToSymbIFFTcp(iqDataSamples)
+      tdIqSamples, nSymbols = self.mapToSymbIFFTcp(iqDataSamples)
 
       print("Resampling")
       tdIqSamples = self.resample(tdIqSamples)
 
       print("Modulating baseband")
-      tdSamples = self.dac(tdIqSamples)
+      tdSamples = self.iqDac(tdIqSamples)
+
+      print(f"Transmitted {nSymbols} symbols")
 
       return tdSamples
 

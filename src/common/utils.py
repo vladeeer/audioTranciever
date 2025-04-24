@@ -4,7 +4,7 @@ import matplotlib.ticker as ticker
 
 def plotSignedSamples(w, h, samples, path, sampleRate = None):
    DPI = 80
-   k = int(len(samples) / w / 16)
+   k = 1
 
    def format_db(x, pos=None):
       if pos == 0:
