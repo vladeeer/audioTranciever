@@ -28,6 +28,8 @@ class Wav:
          self.framerate = file.getframerate()
          self.nFrames = file.getnframes()
 
+         print("------------------------------------")
+         print(f"Read {path}")
          print(f"Channels: {self.nChannels}")
          print(f"Sample size: {self.sampleSize} bytes")
          print(f"Frame rate: {self.framerate} Hz")
@@ -45,6 +47,13 @@ class Wav:
 
    def write(self, path):
       with wave.open(path, "wb") as file:
+         print("------------------------------------")
+         print(f"Write {path}")
+         print(f"Channels: {self.nChannels}")
+         print(f"Sample size: {self.sampleSize} bytes")
+         print(f"Frame rate: {self.framerate} Hz")
+         print(f"Frames: {self.nFrames}")
+
          file.setnchannels(1)
          file.setsampwidth(self.sampleSize)
          file.setframerate(self.framerate)

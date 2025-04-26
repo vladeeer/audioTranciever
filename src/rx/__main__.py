@@ -9,7 +9,7 @@ from ..common.wav import Wav
 from ..common.utils import plotSignedSamples
 from ..rx.receiver import Receiver
 
-#python3 -m src.tx -t samples -i tx.wav -o rx.wav
+#python3 -m src.rx -t samples -m 4 -i tx.wav -o rx.wav -n 2205
 def main():
    parser = argparse.ArgumentParser(description="OFDM audio signal receiver.")
    parser.add_argument("-t" ,"--output-type", choices=["samples", "file"], required=True,
@@ -20,8 +20,8 @@ def main():
                        help="Path to output file")
    parser.add_argument("-m" ,"--mode", type=int, choices=range(0, 9), default=8,
                        help="Selects number of subcarriers, modulation type (BPSK or QPSK) and number of pilots")
-   parser.add_argument("-n" ,"--num-symbols", type=int, required=True,
-                       help="Number of symbols to listen for")
+   parser.add_argument("-n" ,"--num-frames", type=int, required=True,
+                       help="Number of frames to listen for")
    
    args = parser.parse_args()
    input_file_path = args.input_file
@@ -30,9 +30,7 @@ def main():
    tdSamples = Wav(path = input_file_path).samples
 
    receiver = Receiver(args.mode)
-   tdSamples = receiver.receive(tdSamples, args.num_symbols)
-
-   Wav(tdSamples).write(output_file_path)
+   tdSamples = receiver.receive(tdSamples, args.num_frames)
 
    if args.output_type == "samples":
       Wav(tdSamples).write(output_file_path)

@@ -22,7 +22,7 @@ def plotSignedSamples(w, h, samples, path, sampleRate = None):
       out = "%d:%02d" % (mins, secs)
       return out
 
-   plt.figure(1, figsize=(float(w)/DPI, float(h)/DPI), dpi=DPI)
+   plt.figure(figsize=(float(w)/DPI, float(h)/DPI), dpi=DPI)
    plt.subplots_adjust(wspace=0, hspace=0)
    axes = plt.subplot(1, 1, 1)
    axes.plot(samples[::k], "g")
@@ -38,3 +38,12 @@ def plotSignedSamples(w, h, samples, path, sampleRate = None):
    plt.savefig(path)
    plt.close()
 
+def plotStarmap(iqSamples, path):
+   plt.figure(figsize=(8, 8))
+   plt.scatter(np.real(iqSamples), np.imag(iqSamples), alpha=0.25)
+   plt.title('IQ Samples')
+   plt.xlabel('I')
+   plt.ylabel('Q')
+   plt.axis('equal')
+   plt.savefig(path)
+   plt.close()

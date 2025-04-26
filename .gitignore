@@ -175,3 +175,4 @@ cython_debug/
 
 *.wav
 *.png
+*.m4a

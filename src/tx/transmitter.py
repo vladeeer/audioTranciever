@@ -40,7 +40,7 @@ class Transmitter():
                symb[subcIdx] = pilotValue
                pilotIdx = (pilotIdx + 5) % nDataAndPilotSubcarriers # Every fith is a pilot
             else:
-               symb[subcIdx] = iqDataSamples[iqIdx] # add NULLLLLLLLLLLLLLLLLLLLLLLLLLL
+               symb[subcIdx] = iqDataSamples[iqIdx]
                iqIdx += 1
          pilotIdx = (pilotIdx + 1) % 5 # pilots are shifted by one for each symbol
          symb = np.insert(symb, len(symb) // 2, nullValue) # insert null subcarrier
@@ -98,7 +98,7 @@ class Transmitter():
       print("Modulating baseband")
       tdSamples = self.iqDac(tdIqSamples)
 
-      print(f"Transmitted {nSymbols} symbols")
+      print(f"Transmitted {nSymbols // self.symbolsPerFrame} frames")
 
       return tdSamples
 

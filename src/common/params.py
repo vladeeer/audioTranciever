@@ -77,6 +77,7 @@ def getModeParams(self, mode):
     self.symbolLen = self.dftSize
     self.cpLen = np.ceil(self.dftSize * self.cpRatio).astype(int)
     print(f'cpLen: {self.cpLen}')
+    self.symbolsPerFrame = 10
 
 def getModulationParams(self, modulation):
     match modulation:
