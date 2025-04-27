@@ -83,6 +83,7 @@ class Transmitter():
       return modulatedSamples.astype(np.int16)
 
    def transmit(self, samples):
+      print("------------------------------------")
       print("Adding padding")
       paddedSamples = self.pad(samples)
 

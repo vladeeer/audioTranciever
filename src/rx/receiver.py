@@ -11,7 +11,7 @@ class Receiver():
       getModeParams(self, mode)
       getModulationParams(self, self.modulation)
 
-   def iqDac(self, modulatedSamples):
+   def iqAdc(self, modulatedSamples):
       modulatedSamples = modulatedSamples.astype(np.complex64)
 
       timeVec = np.arange(len(modulatedSamples)) / self.sampleRate
@@ -35,6 +35,19 @@ class Receiver():
       
       downsampled = upsampled[::downsampleFactor]
       return downsampled
+
+   def syncSymbols(self, tdIqSamples):
+      s = tdIqSamples[0:(self.dftSize + self.cpLen) * self.symbolsPerFrame * self.nSyncFrames]
+      autocorr = np.abs(np.correlate(s, s, mode='full'))
+      autocorr = autocorr[autocorr.size // 2:]
+      autocorr[0] = 0
+      symbOffset = np.argmax(autocorr) % (self.dftSize + self.cpLen)
+      tdIqSamples = tdIqSamples[symbOffset + (self.dftSize + self.cpLen)*0:] # + (self.dftSize + self.cpLen)*3
+      print(f'sampleOffset: {symbOffset}')
+      plt.plot(autocorr)
+      plt.savefig("Autocor.png")
+      plt.close()
+      return tdIqSamples
 
    def detachCp(self, samples, nSymbols):
       tdIqSamples = np.ndarray(nSymbols * self.dftSize, dtype=np.complex64)
@@ -101,6 +114,7 @@ class Receiver():
 
    def demapIqSample(self, iqSample, pilot):
       iqSample = np.sqrt(2) * iqSample / pilot
+      self.iqData.append(iqSample)
       minD = np.abs(iqSample - self.modulationMap[0])
       val = 0
       for mapIdx in range(1, len(self.modulationMap)):
@@ -130,10 +144,10 @@ class Receiver():
 
    def combineBytes(self, demappedBytes, nFrames):
       iqSamplesPerSample = np.dtype(np.int16).itemsize * 8 // self.bitsPerElement
-      print(iqSamplesPerSample)
+      #print(iqSamplesPerSample)
       nSamples = nFrames * self.symbolsPerFrame * self.nDataSubcarriers // iqSamplesPerSample
-      print(nSamples)
-      print(len(demappedBytes) // iqSamplesPerSample)
+      #print(nSamples)
+      #print(len(demappedBytes) // iqSamplesPerSample)
       samples = np.zeros(nSamples, dtype=np.int16)
       for sampleIdx in range(nSamples):
          sample = np.int16(0)
@@ -145,63 +159,20 @@ class Receiver():
          #print(f'sample: {sample}')
       return samples
 
-
-
-
-#    def pad(self, samples):
-#       suffixLen = (self.audioSamplesPerSymbol - len(samples) % self.audioSamplesPerSymbol) % self.audioSamplesPerSymbol
-#       return np.pad(samples, (0, suffixLen))
-
-#    def mapSamplesToQPSK(self, samples):
-#       iqSamplesPerSample = np.dtype(np.int16).itemsize * 8 // self.bitsPerElement
-#       iqSamples = np.zeros(iqSamplesPerSample * len(samples), dtype=np.complex64)
-#       for sampleIdx, sample in enumerate(samples):
-#          for elementIdx in range(iqSamplesPerSample):
-#             bits = sample & self.modulationBitMask
-#             sample = sample >> self.bitsPerElement
-#             iqSamples[sampleIdx * iqSamplesPerSample + elementIdx] = self.modulationMap[bits]
-#          #print(f'{iqSamples[sampleIdx * iqSamplesPerSample]}{iqSamples[sampleIdx * iqSamplesPerSample + 1]}{iqSamples[sampleIdx * iqSamplesPerSample + 2]}{iqSamples[sampleIdx * iqSamplesPerSample + 3]}{iqSamples[sampleIdx * iqSamplesPerSample + 4]}{iqSamples[sampleIdx * iqSamplesPerSample + 5]}{iqSamples[sampleIdx * iqSamplesPerSample + 6]}{iqSamples[sampleIdx * iqSamplesPerSample + 7]}')
-
-#       return iqSamples
-   
-#    def mapToSymbIFFTcp(self, iqDataSamples):
-#       assert len(iqDataSamples) % self.nDataSubcarriers == 0
-#       nSymbols = len(iqDataSamples) // self.nDataSubcarriers
-#       nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
-#       iqIdx = 0
-#       pilotIdx = 0
-#       tdIqSamples = np.zeros((self.dftSize + self.cpLen) * nSymbols, dtype=np.complex64)
-#       for symbIdx in range(nSymbols):
-#          symb = np.zeros(nDataAndPilotSubcarriers, dtype=np.complex64)
-#          for subcIdx in range(nDataAndPilotSubcarriers):
-#             if subcIdx == pilotIdx:
-#                symb[subcIdx] = pilotValue
-#                pilotIdx = (pilotIdx + 5) % nDataAndPilotSubcarriers # Every fith is a pilot
-#             else:
-#                symb[subcIdx] = iqDataSamples[iqIdx] # add NULLLLLLLLLLLLLLLLLLLLLLLLLLL
-#                iqIdx += 1
-#          pilotIdx = (pilotIdx + 1) % 5 # pilots are shifted by one for each symbol
-#          symb = np.insert(symb, len(symb) // 2, nullValue) # insert null subcarrier
-#          #symb = np.pad(symb, (20, 20), constant_values=(np.complex64(0, 0), np.complex64(0, 0)))
-#          #plt.plot(np.abs(symb))
-#          #plt.savefig("symb.png")
-#          #plt.close()
-#          tdSymb = np.fft.ifft(np.fft.ifftshift(symb))
-#          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : symbIdx * (self.dftSize + self.cpLen) + self.cpLen] = tdSymb[-self.cpLen:]
-#          tdIqSamples[symbIdx * (self.dftSize + self.cpLen) + self.cpLen : (symbIdx + 1) * (self.dftSize + self.cpLen)] = tdSymb[:]
-#          #plt.plot(np.abs(tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : (symbIdx + 1) * (self.dftSize + self.cpLen)]))
-#          #plt.savefig(f"tdSymb/tdSymb{symbIdx}.png")
-#          #plt.close()
-#       return tdIqSamples
-
    def receive(self, tdSamples, nFrames):
+      print("------------------------------------")
       nSymbols = nFrames * self.symbolsPerFrame
 
       print("Demodulating baseband")
-      tdIqSamples = self.iqDac(tdSamples)
+      tdIqSamples = self.iqAdc(tdSamples)
 
       print("Resampling")
       tdIqSamples = self.resample(tdIqSamples)
+
+      #tdIqSamples = tdIqSamples[(self.dftSize + self.cpLen)*5:]
+
+      print("Sync symbols")
+      tdIqSamples = self.syncSymbols(tdIqSamples)
 
       print("Detaching CP")
       tdIqSamples = self.detachCp(tdIqSamples, nSymbols)
@@ -220,27 +191,13 @@ class Receiver():
 
       plotStarmap(combinedPilots, "combinedPilotStarmap.png")
 
+      self.iqData = []
       print("Demapping bytes")
       demappedBytes = self.demapBytes(dataIqSamples, combinedPilots, nFrames)
+      plotStarmap(self.iqData, "pilotedDataStarmap.png")
 
       print("Combining bytes")
       samples = self.combineBytes(demappedBytes, nFrames)
-
-
-      # print("Adding padding")
-      # paddedSamples = self.pad(samples)
-
-      # print("Mapping samples")
-      # iqDataSamples = self.mapSamplesToQPSK(paddedSamples)
-
-      # print("Calculalating OFDM IQ samples")
-      # tdIqSamples = self.mapToSymbIFFTcp(iqDataSamples)
-
-      # print("Resampling")
-      # tdIqSamples = self.resample(tdIqSamples)
-
-      # print("Modulating baseband")
-      # tdSamples = self.iqDac(tdIqSamples)
 
       return samples
 

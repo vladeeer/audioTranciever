@@ -18,7 +18,9 @@ def main():
                        help="Path to input .wav file")
    parser.add_argument("-o" ,"--output-file", type=str, required=True,
                        help="Path to output file")
-   parser.add_argument("-m" ,"--mode", type=int, choices=range(0, 9), default=8,
+   parser.add_argument("-f" ,"--output-frame-rate", type=int, default=44100,
+                       help="Framerate of output .wav file")
+   parser.add_argument("-m" ,"--mode", type=int, default=8, #choices=range(0, 9),
                        help="Selects number of subcarriers, modulation type (BPSK or QPSK) and number of pilots")
    parser.add_argument("-n" ,"--num-frames", type=int, required=True,
                        help="Number of frames to listen for")
@@ -33,7 +35,9 @@ def main():
    tdSamples = receiver.receive(tdSamples, args.num_frames)
 
    if args.output_type == "samples":
-      Wav(tdSamples).write(output_file_path)
+      outWav = Wav(tdSamples)
+      outWav.framerate = args.output_frame_rate
+      outWav.write(output_file_path)
    elif args.output_type == "file":
       tdSamples.tofile(output_file_path)
 
