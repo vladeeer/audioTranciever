@@ -59,7 +59,7 @@ class Transmitter():
    def resample(self, samples):
       upsampleFactor = 3
       downsampleFactor = 1
-      nTaps = 1023
+      nTaps = 8191
       assert upsampleFactor > downsampleFactor
       assert nTaps <= len(samples)
 

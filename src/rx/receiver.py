@@ -25,7 +25,7 @@ class Receiver():
    def resample(self, samples):
       upsampleFactor = 1
       downsampleFactor = 3
-      nTaps = 1023
+      nTaps = 8191
       assert upsampleFactor < downsampleFactor
       assert nTaps <= len(samples)
 
@@ -37,7 +37,7 @@ class Receiver():
       return downsampled
 
    def syncSymbols(self, tdIqSamples):
-      s = tdIqSamples[0:(self.dftSize + self.cpLen) * self.symbolsPerFrame * self.nSyncFrames]
+      s = tdIqSamples[:(self.dftSize + self.cpLen) * self.symbolsPerFrame * 20]
       autocorr = np.abs(np.correlate(s, s, mode='full'))
       autocorr = autocorr[autocorr.size // 2:]
       autocorr[0] = 0
@@ -160,8 +160,16 @@ class Receiver():
       return samples
 
    def receive(self, tdSamples, nFrames):
+      noise = 100 * np.random.randn(len(tdSamples))
+      tdSamples = tdSamples + noise
+      delay = 10
+      delayedSamples = np.pad(tdSamples, (delay, 0))
+      tdSamples = np.pad(tdSamples, (0, delay))
+      tdSamples = tdSamples + 0.1 * delayedSamples
       print("------------------------------------")
       nSymbols = nFrames * self.symbolsPerFrame
+
+      tdSamples = np.pad(tdSamples, (12, 0))
 
       print("Demodulating baseband")
       tdIqSamples = self.iqAdc(tdSamples)

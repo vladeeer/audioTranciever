@@ -99,4 +99,4 @@ def getConsts(self):
     self.bw = 14700
     self.centerFreq = 9000
     self.sampleRate = 44100 # = 14700 * 3
-    self.cpLen = 6 # approx 70 ms
+    self.cpLen = 256 # approx 20 ms
