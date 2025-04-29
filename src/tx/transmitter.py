@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 
 from ..common.params import pilotValue, nullValue, getModeParams, getModulationParams, getConsts
 from ..common.filter import lpFilter
+from ..common.pilotGen import PilotGen
 
 class Transmitter():
    def __init__(self, mode):
@@ -11,7 +12,7 @@ class Transmitter():
       getModulationParams(self, self.modulation)
 
    def pad(self, samples):
-      suffixLen = (self.audioSamplesPerSymbol - len(samples) % self.audioSamplesPerSymbol) % self.audioSamplesPerSymbol
+      suffixLen = (self.audioSamplesPerSymbol - len(samples) % self.audioSamplesPerSymbol) % (self.audioSamplesPerSymbol * self.nMixedSymbolsPerFrame)
       return np.pad(samples, (0, suffixLen))
 
    def mapSamplesToQPSK(self, samples):
@@ -28,12 +29,12 @@ class Transmitter():
    
    def mapToSymbIFFTcp(self, iqDataSamples):
       assert len(iqDataSamples) % self.nDataSubcarriers == 0
-      nSymbols = len(iqDataSamples) // self.nDataSubcarriers
+      nMixedSymbols = len(iqDataSamples) // self.nDataSubcarriers
       nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
       iqIdx = 0
       pilotIdx = 0
-      tdIqSamples = np.zeros((self.dftSize + self.cpLen) * nSymbols, dtype=np.complex64)
-      for symbIdx in range(nSymbols):
+      tdIqSamples = np.zeros((self.dftSize + self.cpLen) * nMixedSymbols, dtype=np.complex64)
+      for symbIdx in range(nMixedSymbols):
          symb = np.zeros(nDataAndPilotSubcarriers, dtype=np.complex64)
          for subcIdx in range(nDataAndPilotSubcarriers):
             if subcIdx == pilotIdx:
@@ -54,7 +55,25 @@ class Transmitter():
          #plt.plot(np.abs(tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : (symbIdx + 1) * (self.dftSize + self.cpLen)]))
          #plt.savefig(f"tdSymb/tdSymb{symbIdx}.png")
          #plt.close()
-      return (tdIqSamples, nSymbols)
+
+      return (tdIqSamples, nMixedSymbols)
+
+   def addPilotSymb(self, tdIqSamples, nFrames):
+      symbLen = self.dftSize + self.cpLen
+      frameLen = symbLen * self.nSymbolsPerFrame
+      pilotlessFrameLen = symbLen * self.nMixedSymbolsPerFrame
+      tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen, dtype=np.complex64)
+
+      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen, self.sampleRate)
+      for frameIdx in range(nFrames): #frameIdx*pilotlessFrameLen
+         tdIqSamplesWithPilotSymb[frameIdx * frameLen : frameIdx * frameLen + symbLen * 5] = \
+            tdIqSamples[frameIdx * pilotlessFrameLen : frameIdx * pilotlessFrameLen + symbLen * 5]
+         tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 5 : frameIdx*frameLen + symbLen * 6] = \
+            pilotGen.bbSymb[:]
+         tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 6 : frameIdx * frameLen + symbLen * 11] = \
+            tdIqSamples[frameIdx * pilotlessFrameLen + symbLen * 5 : frameIdx * pilotlessFrameLen + symbLen * 10]
+         
+      return tdIqSamplesWithPilotSymb
 
    def resample(self, samples):
       upsampleFactor = 3
@@ -91,15 +110,19 @@ class Transmitter():
       iqDataSamples = self.mapSamplesToQPSK(paddedSamples)
 
       print("Calculalating OFDM IQ samples")
-      tdIqSamples, nSymbols = self.mapToSymbIFFTcp(iqDataSamples)
+      tdIqSamples, nMixedSymbols = self.mapToSymbIFFTcp(iqDataSamples)
+      nFrames = nMixedSymbols // self.nMixedSymbolsPerFrame
+
+      print("Adding pilot symbols")
+      tdIqSamplesWithPilotSymb = self.addPilotSymb(tdIqSamples, nFrames)
 
       print("Resampling")
-      tdIqSamples = self.resample(tdIqSamples)
+      tdIqSamples = self.resample(tdIqSamplesWithPilotSymb)
 
       print("Modulating baseband")
       tdSamples = self.iqDac(tdIqSamples)
 
-      print(f"Transmitted {nSymbols // self.symbolsPerFrame} frames")
+      print(f"Transmitted {nFrames} frames")
 
       return tdSamples
 

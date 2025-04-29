@@ -80,9 +80,7 @@ def getModeParams(self, mode):
 
     self.nSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers + self.nNullSubcarriers
     self.dftSize = self.nSubcarriers
-    self.symbolLen = self.dftSize
-    self.symbolsPerFrame = 10
-    self.nSyncFrames = 5
+    self.nSymbolsPerFrame = self.nMixedSymbolsPerFrame + self.nPilotSymmbolsPerFrame
 
 def getModulationParams(self, modulation):
     match modulation:
@@ -100,3 +98,6 @@ def getConsts(self):
     self.centerFreq = 9000
     self.sampleRate = 44100 # = 14700 * 3
     self.cpLen = 256 # approx 20 ms
+    self.nMixedSymbolsPerFrame = 10
+    self.nPilotSymmbolsPerFrame = 1
+    self.nSyncFrames = 5
