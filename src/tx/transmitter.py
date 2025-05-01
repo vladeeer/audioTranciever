@@ -12,8 +12,17 @@ class Transmitter():
       getModulationParams(self, self.modulation)
 
    def pad(self, samples):
-      suffixLen = (self.audioSamplesPerSymbol - len(samples) % self.audioSamplesPerSymbol) % (self.audioSamplesPerSymbol * self.nMixedSymbolsPerFrame)
+      samplesPerFrame = self.audioSamplesPerSymbol * self.nMixedSymbolsPerFrame
+      suffixLen = (samplesPerFrame - (len(samples) % samplesPerFrame)) % samplesPerFrame
       return np.pad(samples, (0, suffixLen))
+
+   def scramble(self, samples):
+      seq = 0xB182
+      samples = samples.view(np.uint16)
+      samples = (samples << 5) | (samples >> (16 - 5)) # Apply cyclic shift before and after xor
+      samples = samples ^ seq
+      samples = (samples >> 3) | (samples << (16 - 3))
+      return samples
 
    def mapSamplesToQPSK(self, samples):
       iqSamplesPerSample = np.dtype(np.int16).itemsize * 8 // self.bitsPerElement
@@ -64,12 +73,12 @@ class Transmitter():
       pilotlessFrameLen = symbLen * self.nMixedSymbolsPerFrame
       tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen, dtype=np.complex64)
 
-      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen, self.sampleRate)
-      for frameIdx in range(nFrames): #frameIdx*pilotlessFrameLen
+      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen)
+      for frameIdx in range(nFrames):
          tdIqSamplesWithPilotSymb[frameIdx * frameLen : frameIdx * frameLen + symbLen * 5] = \
             tdIqSamples[frameIdx * pilotlessFrameLen : frameIdx * pilotlessFrameLen + symbLen * 5]
          tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 5 : frameIdx*frameLen + symbLen * 6] = \
-            pilotGen.bbSymb[:]
+            pilotGen.symbol[:]
          tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 6 : frameIdx * frameLen + symbLen * 11] = \
             tdIqSamples[frameIdx * pilotlessFrameLen + symbLen * 5 : frameIdx * pilotlessFrameLen + symbLen * 10]
          
@@ -106,8 +115,11 @@ class Transmitter():
       print("Adding padding")
       paddedSamples = self.pad(samples)
 
+      print("Scrambling")
+      scrambledSamples = self.scramble(paddedSamples)
+
       print("Mapping samples")
-      iqDataSamples = self.mapSamplesToQPSK(paddedSamples)
+      iqDataSamples = self.mapSamplesToQPSK(scrambledSamples)
 
       print("Calculalating OFDM IQ samples")
       tdIqSamples, nMixedSymbols = self.mapToSymbIFFTcp(iqDataSamples)

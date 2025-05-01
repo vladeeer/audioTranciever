@@ -100,4 +100,4 @@ def getConsts(self):
     self.cpLen = 256 # approx 20 ms
     self.nMixedSymbolsPerFrame = 10
     self.nPilotSymmbolsPerFrame = 1
-    self.nSyncFrames = 5
+    self.nSyncFrames = 5 # ????

@@ -38,17 +38,28 @@ class Receiver():
       return downsampled
 
    def sync(self, tdIqSamples, nFrames):
-      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen, self.sampleRate)
+      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen)
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
 
       s = tdIqSamples[:frameLen]
-      corr = np.correlate(np.abs(s), np.abs(pilotGen.bbSymb), mode='valid')
+      corr = np.abs(np.correlate(s, pilotGen.symbol, mode='valid'))
       initialSampleOffset = (np.argmax(corr) + symbLen * 6) % frameLen
       tdIqSamples = tdIqSamples[initialSampleOffset:]
+
+      lag1 = np.argmax(corr)
+      corr[lag1] = 0
+      lag2 = np.argmax(corr)
+      corr[lag2] = 0
+      lag3 = np.argmax(corr)
+
+      print(f'lag1: {lag1}, lag2: {lag2}, lag3: {lag3}')
+
       print(f'initialSampleOffset: {initialSampleOffset}')
+      #plt.rcParams['agg.path.chunksize'] = 1000
+      #plt.figure(figsize=(500, 0.5))
       plt.plot(corr)
-      plt.savefig("Autocor.png")
+      plt.savefig("Autocor.png", dpi=300)
       plt.close()
 
       desync_warning_shown = None
@@ -56,12 +67,12 @@ class Receiver():
       syncedTdIqSamples[:frameLen] = tdIqSamples[:frameLen]
       for frameIdx in range(1, nFrames):
          s = tdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen]
-         corr = np.correlate(np.abs(s), np.abs(pilotGen.bbSymb), mode='valid')
+         corr = np.correlate(np.abs(s), np.abs(pilotGen.symbol), mode='valid')
          sampleOffset = np.argmax(corr) - symbLen * 5
 
          if (desync_warning_shown is None and sampleOffset != 0):
             print(f'[WARNING] Desync by {sampleOffset} at frame {frameIdx}')
-            desync_warning_shown = True
+            desync_warning_shown = None
 
          syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = \
             tdIqSamples[frameIdx * frameLen + sampleOffset : (frameIdx + 1) * frameLen + sampleOffset]
@@ -135,6 +146,26 @@ class Receiver():
                subcIdx += 5
             subcIdx = (subcIdx + 1) % 5
          combinedPilots[frameIdx*nDataAndPilotSubcarriers : (frameIdx + 1)*nDataAndPilotSubcarriers] = combinedFramePilots[:]
+
+         plt.figure(figsize=(12, 6))
+         plt.subplot(2, 1, 1)
+         plt.plot(np.abs(combinedFramePilots))
+         plt.xlim(0, len(combinedFramePilots))
+         plt.title('Amplitude (Magnitude)')
+         plt.xlabel('Index')
+         plt.ylabel('Amplitude')
+
+         plt.subplot(2, 1, 2)
+         plt.plot(np.angle(combinedFramePilots))
+         plt.ylim(-np.pi, np.pi)
+         plt.xlim(0, len(combinedFramePilots))
+         plt.title('Phase (Angle)')
+         plt.xlabel('Index')
+         plt.ylabel('Phase (radians)')
+
+         plt.tight_layout()
+         plt.savefig(f"channelEstimate/Frame_{frameIdx}.png")
+         plt.close()
       return combinedPilots
 
    def equalizeSample(self, iqSample, pilot):
@@ -185,14 +216,22 @@ class Receiver():
          #print(f'sample: {sample}')
       return samples
 
+   def descramble(self, samples):
+      seq = 0xB182
+      samples = samples.view(np.uint16)
+      samples = (samples << 3) | (samples >> (16 - 3)) # Apply cyclic shift before and after xor
+      samples = samples ^ seq
+      samples = (samples >> 5) | (samples << (16 - 5))
+      return samples
+
    def receive(self, tdSamples, nFrames):
-      #noise = 100 * np.random.randn(len(tdSamples))
-      #tdSamples = tdSamples + noise
+      noise = 1100 * np.random.randn(len(tdSamples))
+      tdSamples = tdSamples + noise
       #delay = 12
       #delayedSamples = np.pad(tdSamples, (delay, 0))
       #tdSamples = np.pad(tdSamples, (0, delay))
       #tdSamples = tdSamples + 0.1 * delayedSamples
-      tdSamples = np.pad(tdSamples, (16, 0))
+      #tdSamples = np.pad(tdSamples, (59, 0))
       print("------------------------------------")
 
       print("Demodulating baseband")
@@ -204,7 +243,7 @@ class Receiver():
       #tdIqSamples = tdIqSamples[(self.dftSize + self.cpLen)*11 - 10:]
 
       print("Sync Frames")
-      tdIqSamples = self.sync(tdIqSamples, nFrames)
+      #tdIqSamples = self.sync(tdIqSamples, nFrames)
 
       print("Detaching CP")
       tdIqSamples = self.detachCp(tdIqSamples, nFrames)
@@ -230,6 +269,9 @@ class Receiver():
 
       print("Combining bytes")
       samples = self.combineBytes(demappedBytes, nFrames)
+
+      print("Descrambling")
+      samples = self.descramble(samples)
 
       return samples
 
