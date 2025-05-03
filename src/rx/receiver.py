@@ -90,75 +90,66 @@ class Receiver():
    
    def fft(self, samples, nFrames):
       nSymbols = nFrames * self.nSymbolsPerFrame
-      nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
-      fdIqSamples = np.ndarray(nSymbols * nDataAndPilotSubcarriers, dtype=np.complex64)
+      fdIqSamples = np.ndarray(nSymbols * self.nSubcarriers, dtype=np.complex64)
       for symbIdx in range(nSymbols):
          tdSymb = samples[symbIdx*self.dftSize : (symbIdx + 1)*self.dftSize]
          fdSymb = np.fft.fftshift(np.fft.fft(tdSymb))
          fdSymb = np.delete(fdSymb, len(fdSymb) // 2)
-         fdIqSamples[symbIdx*nDataAndPilotSubcarriers : (symbIdx + 1)*nDataAndPilotSubcarriers] = fdSymb
+         fdIqSamples[symbIdx * self.nSubcarriers : (symbIdx + 1) * self.nSubcarriers] = fdSymb
          #plt.plot(np.abs(fdSymb))
          #plt.savefig(f"symbs/symb{symbIdx}.png")
          #plt.close()
       return fdIqSamples
 
    def detachPilots(self, iqSamples, nFrames):
-      nMixedSymbols = nFrames * self.nMixedSymbolsPerFrame
-      nSymbols = nFrames * self.nSymbolsPerFrame
-      nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
-      assert len(iqSamples) % nDataAndPilotSubcarriers == 0
-      nextPilot = 0
-      iqIdx = 0
-      pilotIdx = 0
+      assert len(iqSamples) % self.nSubcarriers == 0
+      symbLen = self.nSubcarriers
+      pilotFrameLen = symbLen * self.nPilotSymmbolsPerFrame
+      dataFrameLen = symbLen * self.nDataSymbolsPerFrame
+      frameLen = symbLen * self.nSymbolsPerFrame
 
-      dataIqSamples = np.zeros(nMixedSymbols * self.nDataSubcarriers, dtype=np.complex64)
-      pilotIqSamples = np.zeros(nMixedSymbols * self.nPilotSubcarriers, dtype=np.complex64)
-      for symbIdx in range(nSymbols):
-         if symbIdx % self.nSymbolsPerFrame != 5:
-            for subcIdx in range(nDataAndPilotSubcarriers):
-               if subcIdx == nextPilot:
-                  pilotIqSamples[pilotIdx] = iqSamples[symbIdx * nDataAndPilotSubcarriers + subcIdx]
-                  pilotIdx += 1
-                  nextPilot = (nextPilot + 5) % nDataAndPilotSubcarriers # Every fith is a pilot
-               else:
-                  dataIqSamples[iqIdx] = iqSamples[symbIdx * nDataAndPilotSubcarriers + subcIdx]
-                  iqIdx += 1
-            nextPilot = (nextPilot + 1) % 5 # pilots are shifted by one for each symbol
+      pilotFdIqSamples = np.zeros(nFrames * pilotFrameLen, dtype=np.complex64)
+      dataFdIqSamples = np.zeros(nFrames * dataFrameLen, dtype=np.complex64)
 
-      return (dataIqSamples, pilotIqSamples)
-
-   def combinePilots(self, pilotIqSamples, nFrames):
-      nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
-      combinedPilots = np.zeros(len(pilotIqSamples) // 2, dtype=np.complex64)
+      pilotSymbIdx = 0
+      dataSymbIdx = 0
       for frameIdx in range(nFrames):
-         combinedFramePilots = np.zeros(nDataAndPilotSubcarriers, dtype=np.complex64)
-         subcIdx = 0
-         for symbIdx in range(self.nMixedSymbolsPerFrame // 2):
-            for pilotIdx in range(self.nPilotSubcarriers):
-               combinedFramePilots[subcIdx] = \
-                  pilotIqSamples[frameIdx*self.nMixedSymbolsPerFrame + symbIdx*self.nPilotSubcarriers + pilotIdx]
-               subcIdx += 5
-            subcIdx = (subcIdx + 1) % 5
-         for symbIdx in range(self.nMixedSymbolsPerFrame // 2, self.nMixedSymbolsPerFrame):
-            for pilotIdx in range(self.nPilotSubcarriers):
-               combinedFramePilots[subcIdx - self.nMixedSymbolsPerFrame // 2] = \
-                  (combinedFramePilots[subcIdx] + pilotIqSamples[frameIdx*self.nMixedSymbolsPerFrame + symbIdx*self.nPilotSubcarriers + pilotIdx]) * 0.5
-               subcIdx += 5
-            subcIdx = (subcIdx + 1) % 5
-         combinedPilots[frameIdx*nDataAndPilotSubcarriers : (frameIdx + 1)*nDataAndPilotSubcarriers] = combinedFramePilots[:]
+         for symbIdx in range(self.nSymbolsPerFrame):
+            if symbIdx in self.pilotSymbInd:
+               pilotFdIqSamples[pilotSymbIdx * symbLen : (pilotSymbIdx + 1) * symbLen] = \
+                  iqSamples[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen]
+               pilotSymbIdx += 1
+            elif symbIdx in self.dataSymbInd:
+               dataFdIqSamples[dataSymbIdx * symbLen : (dataSymbIdx + 1) * symbLen] = \
+                  iqSamples[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen]
+               dataSymbIdx += 1
+
+      return (dataFdIqSamples, pilotFdIqSamples)
+
+   def estimateChannel(self, pilotFdIqSamples, nFrames):
+      symbLen = self.nSubcarriers
+      pilotFrameLen = symbLen * self.nPilotSymmbolsPerFrame
+
+      pilotGen = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen)
+
+      combinedPilots = np.zeros(nFrames * symbLen, dtype=np.complex64)
+      for frameIdx in range(nFrames):
+         estimation = pilotFdIqSamples[frameIdx * pilotFrameLen : frameIdx * pilotFrameLen + symbLen]
+         estimation /= pilotGen.fdSymb[:]
+         combinedPilots[frameIdx * self.nSubcarriers : (frameIdx + 1) * self.nSubcarriers] = estimation
 
          plt.figure(figsize=(12, 6))
          plt.subplot(2, 1, 1)
-         plt.plot(np.abs(combinedFramePilots))
-         plt.xlim(0, len(combinedFramePilots))
+         plt.plot(np.abs(estimation))
+         plt.xlim(0, len(estimation))
          plt.title('Amplitude (Magnitude)')
          plt.xlabel('Index')
          plt.ylabel('Amplitude')
 
          plt.subplot(2, 1, 2)
-         plt.plot(np.angle(combinedFramePilots))
+         plt.plot(np.angle(estimation))
          plt.ylim(-np.pi, np.pi)
-         plt.xlim(0, len(combinedFramePilots))
+         plt.xlim(0, len(estimation))
          plt.title('Phase (Angle)')
          plt.xlabel('Index')
          plt.ylabel('Phase (radians)')
@@ -168,9 +159,9 @@ class Receiver():
          plt.close()
       return combinedPilots
 
-   def equalizeSample(self, iqSample, pilot):
+   def equalizeSample(self, iqSample, channelEstimate):
       epsilon = 0.000000001
-      iqSample = np.sqrt(2) * iqSample / (pilot + np.complex64(epsilon, 0))
+      iqSample = np.sqrt(2) * iqSample / (channelEstimate + np.complex64(epsilon, 0))
       self.iqData.append(iqSample)
       minD = np.abs(iqSample - self.modulationMap[0])
       val = 0
@@ -182,27 +173,21 @@ class Receiver():
       #print(f'{iqSample} {pilot} {val}')
       return val
 
-   def demapBytes(self, dataIqSamples, combinedPilots, nFrames):
-      nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
+   def demapBytes(self, dataIqSamples, channelEstimates, nFrames):
       demapedBytes = np.zeros(len(dataIqSamples), dtype=np.int16)
       dataIdx = 0
       for frameIdx in range(nFrames):
-         pilotIdx = 0
-         for symboldIdx in range(self.nMixedSymbolsPerFrame):
-            for subcIdx in range(nDataAndPilotSubcarriers):
-               if subcIdx == pilotIdx:
-                  pilotIdx += 5
-               else:
-                  demapedSample = self.equalizeSample(dataIqSamples[dataIdx], combinedPilots[frameIdx*nDataAndPilotSubcarriers + subcIdx])
-                  demapedBytes[dataIdx] = demapedSample
-                  dataIdx += 1
-            pilotIdx = (pilotIdx + 1) % 5
+         for symboldIdx in range(self.nDataSymbolsPerFrame):
+            for subcIdx in range(self.nSubcarriers):
+               demapedSample = self.equalizeSample(dataIqSamples[dataIdx], channelEstimates[frameIdx * self.nSubcarriers + subcIdx])
+               demapedBytes[dataIdx] = demapedSample
+               dataIdx += 1
       return demapedBytes
 
    def combineBytes(self, demappedBytes, nFrames):
-      iqSamplesPerSample = np.dtype(np.int16).itemsize * 8 // self.bitsPerElement
+      iqSamplesPerSample = 16 // self.bitsPerElement
       #print(iqSamplesPerSample)
-      nSamples = nFrames * self.nMixedSymbolsPerFrame * self.nDataSubcarriers // iqSamplesPerSample
+      nSamples = nFrames * self.nDataSymbolsPerFrame * self.nSubcarriers // iqSamplesPerSample
       #print(nSamples)
       #print(len(demappedBytes) // iqSamplesPerSample)
       samples = np.zeros(nSamples, dtype=np.int16)
@@ -225,13 +210,18 @@ class Receiver():
       return samples
 
    def receive(self, tdSamples, nFrames):
-      noise = 1100 * np.random.randn(len(tdSamples))
-      tdSamples = tdSamples + noise
+      print("------------------------------------")
+      sinr_dB = 20
+      signalPower = np.mean((tdSamples.astype(np.int32))**2)
+      noisePower = signalPower / (10 ** (sinr_dB / 10))
+      print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
+      noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
+      #tdSamples = tdSamples + noise
       #delay = 12
       #delayedSamples = np.pad(tdSamples, (delay, 0))
       #tdSamples = np.pad(tdSamples, (0, delay))
       #tdSamples = tdSamples + 0.1 * delayedSamples
-      #tdSamples = np.pad(tdSamples, (59, 0))
+      #tdSamples = np.pad(tdSamples, (61, 0))
       print("------------------------------------")
 
       print("Demodulating baseband")
@@ -252,19 +242,19 @@ class Receiver():
       fdIqSamples = self.fft(tdIqSamples, nFrames)
 
       print("Separating pilots from data")
-      dataIqSamples, pilotIqSamples = self.detachPilots(fdIqSamples, nFrames)
+      dataFdIqSamples, pilotFdIqSamples = self.detachPilots(fdIqSamples, nFrames)
 
-      plotStarmap(dataIqSamples, "dataStarmap.png")
-      plotStarmap(pilotIqSamples, "pilotStarmap.png")
+      plotStarmap(dataFdIqSamples, "dataStarmap.png")
+      plotStarmap(pilotFdIqSamples, "pilotStarmap.png")
 
-      print("Combining pilots")
-      combinedPilots = self.combinePilots(pilotIqSamples, nFrames)
+      print("Estimating channel response")
+      channelEstimates = self.estimateChannel(pilotFdIqSamples, nFrames)
 
-      plotStarmap(combinedPilots, "combinedPilotStarmap.png")
+      plotStarmap(channelEstimates, "combinedPilotStarmap.png")
 
       self.iqData = []
       print("Demapping bytes")
-      demappedBytes = self.demapBytes(dataIqSamples, combinedPilots, nFrames)
+      demappedBytes = self.demapBytes(dataFdIqSamples, channelEstimates, nFrames)
       plotStarmap(self.iqData, "pilotedDataStarmap.png")
 
       print("Combining bytes")

@@ -12,7 +12,7 @@ class Transmitter():
       getModulationParams(self, self.modulation)
 
    def pad(self, samples):
-      samplesPerFrame = self.audioSamplesPerSymbol * self.nMixedSymbolsPerFrame
+      samplesPerFrame = self.audioSamplesPerSymbol * self.nDataSymbolsPerFrame
       suffixLen = (samplesPerFrame - (len(samples) % samplesPerFrame)) % samplesPerFrame
       return np.pad(samples, (0, suffixLen))
 
@@ -25,7 +25,7 @@ class Transmitter():
       return samples
 
    def mapSamplesToQPSK(self, samples):
-      iqSamplesPerSample = np.dtype(np.int16).itemsize * 8 // self.bitsPerElement
+      iqSamplesPerSample = 16 // self.bitsPerElement
       iqSamples = np.zeros(iqSamplesPerSample * len(samples), dtype=np.complex64)
       for sampleIdx, sample in enumerate(samples):
          for elementIdx in range(iqSamplesPerSample):
@@ -37,50 +37,50 @@ class Transmitter():
       return iqSamples
    
    def mapToSymbIFFTcp(self, iqDataSamples):
-      assert len(iqDataSamples) % self.nDataSubcarriers == 0
-      nMixedSymbols = len(iqDataSamples) // self.nDataSubcarriers
-      nDataAndPilotSubcarriers = self.nDataSubcarriers + self.nPilotSubcarriers
+      assert len(iqDataSamples) % self.nSubcarriers == 0
+      nDataSymbols = len(iqDataSamples) // self.nSubcarriers
+      symbLen = self.dftSize + self.cpLen
+
+      tdIqSamples = np.zeros((self.dftSize + self.cpLen) * nDataSymbols, dtype=np.complex64)
       iqIdx = 0
-      pilotIdx = 0
-      tdIqSamples = np.zeros((self.dftSize + self.cpLen) * nMixedSymbols, dtype=np.complex64)
-      for symbIdx in range(nMixedSymbols):
-         symb = np.zeros(nDataAndPilotSubcarriers, dtype=np.complex64)
-         for subcIdx in range(nDataAndPilotSubcarriers):
-            if subcIdx == pilotIdx:
-               symb[subcIdx] = pilotValue
-               pilotIdx = (pilotIdx + 5) % nDataAndPilotSubcarriers # Every fith is a pilot
-            else:
-               symb[subcIdx] = iqDataSamples[iqIdx]
-               iqIdx += 1
-         pilotIdx = (pilotIdx + 1) % 5 # pilots are shifted by one for each symbol
+      for symbIdx in range(nDataSymbols):
+         symb = np.zeros(self.nSubcarriers, dtype=np.complex64)
+         for subcIdx in range(self.nSubcarriers):
+            symb[subcIdx] = iqDataSamples[iqIdx]
+            iqIdx += 1
          symb = np.insert(symb, len(symb) // 2, nullValue) # insert null subcarrier
          #symb = np.pad(symb, (20, 20), constant_values=(np.complex64(0, 0), np.complex64(0, 0)))
          #plt.plot(np.abs(symb))
          #plt.savefig("symb.png")
          #plt.close()
          tdSymb = np.fft.ifft(np.fft.ifftshift(symb))
-         tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : symbIdx * (self.dftSize + self.cpLen) + self.cpLen] = tdSymb[-self.cpLen:]
-         tdIqSamples[symbIdx * (self.dftSize + self.cpLen) + self.cpLen : (symbIdx + 1) * (self.dftSize + self.cpLen)] = tdSymb[:]
+         tdIqSamples[symbIdx * symbLen : symbIdx * symbLen + self.cpLen] = tdSymb[-self.cpLen:]
+         tdIqSamples[symbIdx * symbLen + self.cpLen : (symbIdx + 1) * symbLen] = tdSymb[:]
          #plt.plot(np.abs(tdIqSamples[symbIdx * (self.dftSize + self.cpLen) : (symbIdx + 1) * (self.dftSize + self.cpLen)]))
          #plt.savefig(f"tdSymb/tdSymb{symbIdx}.png")
          #plt.close()
 
-      return (tdIqSamples, nMixedSymbols)
+      return (tdIqSamples, nDataSymbols)
 
    def addPilotSymb(self, tdIqSamples, nFrames):
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
-      pilotlessFrameLen = symbLen * self.nMixedSymbolsPerFrame
-      tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen, dtype=np.complex64)
+      pilotlessFrameLen = symbLen * self.nDataSymbolsPerFrame
 
-      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen)
+      pilotGen = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen)
+
+      tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen * self.nPilotSymmbolsPerFrame, dtype=np.complex64)
+
       for frameIdx in range(nFrames):
-         tdIqSamplesWithPilotSymb[frameIdx * frameLen : frameIdx * frameLen + symbLen * 5] = \
-            tdIqSamples[frameIdx * pilotlessFrameLen : frameIdx * pilotlessFrameLen + symbLen * 5]
-         tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 5 : frameIdx*frameLen + symbLen * 6] = \
-            pilotGen.symbol[:]
-         tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbLen * 6 : frameIdx * frameLen + symbLen * 11] = \
-            tdIqSamples[frameIdx * pilotlessFrameLen + symbLen * 5 : frameIdx * pilotlessFrameLen + symbLen * 10]
+         dataSymbIdx = 0
+         for symbIdx in range(self.nSymbolsPerFrame):
+            if symbIdx in self.pilotSymbInd:
+               tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen] = \
+                  pilotGen.symbol[:]
+            elif symbIdx in self.dataSymbInd:
+               tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen] = \
+                  tdIqSamples[frameIdx * pilotlessFrameLen + dataSymbIdx * symbLen : frameIdx * pilotlessFrameLen + (dataSymbIdx + 1) * symbLen]
+               dataSymbIdx += 1
          
       return tdIqSamplesWithPilotSymb
 
@@ -123,7 +123,7 @@ class Transmitter():
 
       print("Calculalating OFDM IQ samples")
       tdIqSamples, nMixedSymbols = self.mapToSymbIFFTcp(iqDataSamples)
-      nFrames = nMixedSymbols // self.nMixedSymbolsPerFrame
+      nFrames = nMixedSymbols // self.nDataSymbolsPerFrame
 
       print("Adding pilot symbols")
       tdIqSamplesWithPilotSymb = self.addPilotSymb(tdIqSamples, nFrames)

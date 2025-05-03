@@ -32,10 +32,9 @@ def main():
       inputSamples = np.fromfile(input_file_path, dtype=np.int16)
       outputSamples = np.fromfile(output_file_path, dtype=np.int16)
 
-   #assert inputSamples.shape == outputSamples.shape
-
    transmitter = Transmitter(args.mode)
    inputSamples = transmitter.pad(inputSamples)
+   assert inputSamples.shape == outputSamples.shape
 
    diff = (inputSamples ^ outputSamples).view(np.uint8)
    diffBits = np.unpackbits(diff)
