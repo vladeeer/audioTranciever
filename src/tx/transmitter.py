@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ..common.params import pilotValue, nullValue, getModeParams, getModulationParams, getConsts
+from ..common.params import nullValue, getModeParams, getModulationParams, getConsts
 from ..common.filter import lpFilter
 from ..common.pilotGen import PilotGen
 
@@ -17,11 +17,18 @@ class Transmitter():
       return np.pad(samples, (0, suffixLen))
 
    def scramble(self, samples):
-      seq = 0xB182
-      samples = samples.view(np.uint16)
-      samples = (samples << 5) | (samples >> (16 - 5)) # Apply cyclic shift before and after xor
-      samples = samples ^ seq
-      samples = (samples >> 3) | (samples << (16 - 3))
+      assert len(samples) % self.audioSamplesPerSymbol == 0
+      nSymbols = len(samples) // self.audioSamplesPerSymbol
+
+      n = np.arange(self.audioSamplesPerSymbol)
+      seq = (534534512311 * n + 1984).astype(np.uint16)
+      for symbIdx in range(nSymbols):
+         symbolSamples = samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)].view(np.uint16)
+         symbolSamples = (symbolSamples << 5) | (symbolSamples >> (16 - 5)) # Apply cyclic shift before and after xor
+         symbolSamples = symbolSamples ^ seq
+         symbolSamples = (symbolSamples >> 3) | (symbolSamples << (16 - 3))
+         samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)] = symbolSamples
+
       return samples
 
    def mapSamplesToQPSK(self, samples):
@@ -67,16 +74,20 @@ class Transmitter():
       frameLen = symbLen * self.nSymbolsPerFrame
       pilotlessFrameLen = symbLen * self.nDataSymbolsPerFrame
 
-      pilotGen = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen)
+      pilotGen0 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 0)
+      pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
 
       tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen * self.nPilotSymmbolsPerFrame, dtype=np.complex64)
 
       for frameIdx in range(nFrames):
          dataSymbIdx = 0
          for symbIdx in range(self.nSymbolsPerFrame):
-            if symbIdx in self.pilotSymbInd:
+            if symbIdx == self.pilotSymbInd[0]:
                tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen] = \
-                  pilotGen.symbol[:]
+                  pilotGen0.symbol[:]
+            elif symbIdx == self.pilotSymbInd[1]:
+               tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen] = \
+                  pilotGen1.symbol[:]
             elif symbIdx in self.dataSymbInd:
                tdIqSamplesWithPilotSymb[frameIdx * frameLen + symbIdx * symbLen : frameIdx * frameLen + (symbIdx + 1) * symbLen] = \
                   tdIqSamples[frameIdx * pilotlessFrameLen + dataSymbIdx * symbLen : frameIdx * pilotlessFrameLen + (dataSymbIdx + 1) * symbLen]
@@ -85,7 +96,7 @@ class Transmitter():
       return tdIqSamplesWithPilotSymb
 
    def resample(self, samples):
-      upsampleFactor = 3
+      upsampleFactor = self.resamplingFactor
       downsampleFactor = 1
       nTaps = 8191
       assert upsampleFactor > downsampleFactor

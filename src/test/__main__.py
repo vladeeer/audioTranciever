@@ -32,8 +32,18 @@ def main():
       inputSamples = np.fromfile(input_file_path, dtype=np.int16)
       outputSamples = np.fromfile(output_file_path, dtype=np.int16)
 
-   transmitter = Transmitter(args.mode)
-   inputSamples = transmitter.pad(inputSamples)
+   print(f'len(inputSamples): {len(inputSamples)}, len(outputSamples): {len(outputSamples)}')
+   if len(inputSamples) <= len(outputSamples):
+      transmitter = Transmitter(args.mode)
+      inputSamples = transmitter.pad(inputSamples)
+   else:
+      corr = np.correlate(inputSamples.astype(np.float64), outputSamples.astype(np.float64), mode='valid')
+      sampleOffset = np.argmax(corr)
+      inputSamples = inputSamples[sampleOffset : sampleOffset + len(outputSamples)]
+      print(f'sampleOffset: {sampleOffset}')
+      plt.plot(corr)
+      plt.savefig("testCorr.png", dpi=300)
+      plt.close()
    assert inputSamples.shape == outputSamples.shape
 
    diff = (inputSamples ^ outputSamples).view(np.uint8)

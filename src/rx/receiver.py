@@ -16,7 +16,7 @@ class Receiver():
       modulatedSamples = modulatedSamples.astype(np.complex64)
 
       timeVec = np.arange(len(modulatedSamples)) / self.sampleRate
-      exponent = np.sqrt(2) * np.exp(-1j * 2 * np.pi * self.centerFreq * timeVec)
+      exponent = np.exp(-1j * 2 * np.pi * self.centerFreq * timeVec)
       demodulatedSamples = modulatedSamples * exponent
 
       #print(np.average(np.abs(modulatedSamples)))
@@ -25,7 +25,7 @@ class Receiver():
 
    def resample(self, samples):
       upsampleFactor = 1
-      downsampleFactor = 3
+      downsampleFactor = self.resamplingFactor
       nTaps = 8191
       assert upsampleFactor < downsampleFactor
       assert nTaps <= len(samples)
@@ -38,27 +38,40 @@ class Receiver():
       return downsampled
 
    def sync(self, tdIqSamples, nFrames):
-      pilotGen = PilotGen(self.nDataSubcarriers, self.nPilotSubcarriers, self.nNullSubcarriers, self.cpLen)
+      pilotGen0 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 0)
+      pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
 
-      s = tdIqSamples[:frameLen]
-      corr = np.abs(np.correlate(s, pilotGen.symbol, mode='valid'))
-      initialSampleOffset = (np.argmax(corr) + symbLen * 6) % frameLen
+      maxInd0 = 0
+      maxInd1 = 0
+      while maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
+         s = tdIqSamples[:frameLen]
+         corr0 = np.abs(np.correlate(s, pilotGen0.symbol, mode='valid'))
+         corr1 = np.abs(np.correlate(s, pilotGen1.symbol, mode='valid'))
+         maxInd0 = np.argmax(corr0)
+         maxInd1 = np.argmax(corr1)
+         tdIqSamples = tdIqSamples[1:]
+
+      initialSampleOffset = (np.argmax(corr0) + symbLen * 11 - 2) % frameLen 
       tdIqSamples = tdIqSamples[initialSampleOffset:]
 
-      lag1 = np.argmax(corr)
-      corr[lag1] = 0
-      lag2 = np.argmax(corr)
-      corr[lag2] = 0
-      lag3 = np.argmax(corr)
+      lag1 = np.argmax(corr0)
+      corr0[lag1] = 0
+      lag2 = np.argmax(corr0)
+      corr0[lag2] = 0
+      lag3 = np.argmax(corr0)
 
       print(f'lag1: {lag1}, lag2: {lag2}, lag3: {lag3}')
 
       print(f'initialSampleOffset: {initialSampleOffset}')
       #plt.rcParams['agg.path.chunksize'] = 1000
       #plt.figure(figsize=(500, 0.5))
-      plt.plot(corr)
+      plt.subplot(2, 1, 1)
+      plt.plot(corr0)
+      plt.subplot(2, 1, 2)
+      plt.plot(corr1)
+      plt.tight_layout()
       plt.savefig("Autocor.png", dpi=300)
       plt.close()
 
@@ -67,8 +80,8 @@ class Receiver():
       syncedTdIqSamples[:frameLen] = tdIqSamples[:frameLen]
       for frameIdx in range(1, nFrames):
          s = tdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen]
-         corr = np.correlate(np.abs(s), np.abs(pilotGen.symbol), mode='valid')
-         sampleOffset = np.argmax(corr) - symbLen * 5
+         corr0 = np.correlate(np.abs(s), np.abs(pilotGen0.symbol), mode='valid')
+         sampleOffset = 0  #np.argmax(corr0) - symbLen * 5
 
          if (desync_warning_shown is None and sampleOffset != 0):
             print(f'[WARNING] Desync by {sampleOffset} at frame {frameIdx}')
@@ -130,38 +143,51 @@ class Receiver():
       symbLen = self.nSubcarriers
       pilotFrameLen = symbLen * self.nPilotSymmbolsPerFrame
 
-      pilotGen = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen)
+      pilotGen0 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 0)
+      pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
 
       combinedPilots = np.zeros(nFrames * symbLen, dtype=np.complex64)
       for frameIdx in range(nFrames):
-         estimation = pilotFdIqSamples[frameIdx * pilotFrameLen : frameIdx * pilotFrameLen + symbLen]
-         estimation /= pilotGen.fdSymb[:]
+         estimation0 = pilotFdIqSamples[frameIdx * pilotFrameLen : frameIdx * pilotFrameLen + symbLen]
+         estimation0 /= pilotGen0.fdSymb[:]
+         phase0 = np.angle(estimation0)
+         amp0 = np.abs(estimation0)
+         estimation1 = pilotFdIqSamples[frameIdx * pilotFrameLen + symbLen : frameIdx * pilotFrameLen + 2 * symbLen]
+         estimation1 /= pilotGen1.fdSymb[:]
+         phase1 = np.angle(estimation1)
+         amp1 = np.abs(estimation1)
+
+         amp = 0.5 * (amp0 + amp1)
+         phase = 0.5 * (phase0 + phase1)
+         estimation = estimation0 #np.array(amp * (np.cos(phase) + 1j * np.sin(phase)), dtype = np.complex64)
+
          combinedPilots[frameIdx * self.nSubcarriers : (frameIdx + 1) * self.nSubcarriers] = estimation
 
-         plt.figure(figsize=(12, 6))
-         plt.subplot(2, 1, 1)
-         plt.plot(np.abs(estimation))
-         plt.xlim(0, len(estimation))
-         plt.title('Amplitude (Magnitude)')
-         plt.xlabel('Index')
-         plt.ylabel('Amplitude')
+         if frameIdx < 10:
+            plt.figure(figsize=(12, 6))
+            plt.subplot(2, 1, 1)
+            plt.plot(np.abs(estimation))
+            plt.xlim(0, len(estimation))
+            plt.title('Amplitude (Magnitude)')
+            plt.xlabel('Index')
+            plt.ylabel('Amplitude')
 
-         plt.subplot(2, 1, 2)
-         plt.plot(np.angle(estimation))
-         plt.ylim(-np.pi, np.pi)
-         plt.xlim(0, len(estimation))
-         plt.title('Phase (Angle)')
-         plt.xlabel('Index')
-         plt.ylabel('Phase (radians)')
+            plt.subplot(2, 1, 2)
+            plt.plot(np.angle(estimation))
+            plt.ylim(-np.pi, np.pi)
+            plt.xlim(0, len(estimation))
+            plt.title('Phase (Angle)')
+            plt.xlabel('Index')
+            plt.ylabel('Phase (radians)')
 
-         plt.tight_layout()
-         plt.savefig(f"channelEstimate/Frame_{frameIdx}.png")
-         plt.close()
+            plt.tight_layout()
+            plt.savefig(f"channelEstimate/Frame_{frameIdx}.png")
+            plt.close()
       return combinedPilots
 
    def equalizeSample(self, iqSample, channelEstimate):
       epsilon = 0.000000001
-      iqSample = np.sqrt(2) * iqSample / (channelEstimate + np.complex64(epsilon, 0))
+      iqSample = iqSample / (channelEstimate + np.complex64(epsilon, 0))
       self.iqData.append(iqSample)
       minD = np.abs(iqSample - self.modulationMap[0])
       val = 0
@@ -202,26 +228,33 @@ class Receiver():
       return samples
 
    def descramble(self, samples):
-      seq = 0xB182
-      samples = samples.view(np.uint16)
-      samples = (samples << 3) | (samples >> (16 - 3)) # Apply cyclic shift before and after xor
-      samples = samples ^ seq
-      samples = (samples >> 5) | (samples << (16 - 5))
-      return samples
+      assert len(samples) % self.audioSamplesPerSymbol == 0
+      nSymbols = len(samples) // self.audioSamplesPerSymbol
+
+      n = np.arange(self.audioSamplesPerSymbol)
+      seq = (534534512311 * n + 1984).astype(np.uint16)
+      for symbIdx in range(nSymbols):
+         symbolSamples = samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)].view(np.uint16)
+         symbolSamples = (symbolSamples << 3) | (symbolSamples >> (16 - 3)) # Apply cyclic shift before and after xor
+         symbolSamples = symbolSamples ^ seq
+         symbolSamples = (symbolSamples >> 5) | (symbolSamples << (16 - 5))
+
+         samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)] = symbolSamples
+      return samples.view(np.int16)
 
    def receive(self, tdSamples, nFrames):
       print("------------------------------------")
-      sinr_dB = 20
+      sinr_dB = 12
       signalPower = np.mean((tdSamples.astype(np.int32))**2)
       noisePower = signalPower / (10 ** (sinr_dB / 10))
       print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
       noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
-      #tdSamples = tdSamples + noise
-      #delay = 12
-      #delayedSamples = np.pad(tdSamples, (delay, 0))
-      #tdSamples = np.pad(tdSamples, (0, delay))
-      #tdSamples = tdSamples + 0.1 * delayedSamples
-      #tdSamples = np.pad(tdSamples, (61, 0))
+      tdSamples = tdSamples + noise
+      delay = 100
+      delayedSamples = np.pad(tdSamples, (delay, 0))
+      tdSamples = np.pad(tdSamples, (0, delay))
+      tdSamples = tdSamples + 0.7 * delayedSamples
+      tdSamples = np.pad(tdSamples, (62, 0))
       print("------------------------------------")
 
       print("Demodulating baseband")
@@ -233,7 +266,7 @@ class Receiver():
       #tdIqSamples = tdIqSamples[(self.dftSize + self.cpLen)*11 - 10:]
 
       print("Sync Frames")
-      #tdIqSamples = self.sync(tdIqSamples, nFrames)
+      tdIqSamples = self.sync(tdIqSamples, nFrames)
 
       print("Detaching CP")
       tdIqSamples = self.detachCp(tdIqSamples, nFrames)

@@ -64,12 +64,13 @@ def getModeParams(self, mode):
             self.audioSamplesPerSymbol = 16
         case 9: # QPSK, 32 pilots, 16 audio samples per symbol
             self.modulation = "QPSK"
-            self.nSubcarriers = 256
+            self.nSubcarriers = 512
             self.nNullSubcarriers = 1
-            self.audioSamplesPerSymbol = 32
+            self.audioSamplesPerSymbol = 64
 
     self.dftSize = self.nSubcarriers + self.nNullSubcarriers
     self.nSymbolsPerFrame = self.nDataSymbolsPerFrame + self.nPilotSymmbolsPerFrame
+    self.audioSamplesPerFrame = self.nDataSymbolsPerFrame * self.audioSamplesPerSymbol
 
 def getModulationParams(self, modulation):
     match modulation:
@@ -86,7 +87,8 @@ def getConsts(self):
     self.bw = 14700
     self.centerFreq = 9000
     self.sampleRate = 44100 # = 14700 * 3
-    self.cpLen = 256 # approx 20 ms
+    self.resamplingFactor = 3
+    self.cpLen = 256 # approx 17ms of echo or 6m of distance delta 
     self.nDataSymbolsPerFrame = 12
     self.nPilotSymmbolsPerFrame = 2
     self.dataSymbInd = np.array([0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13])
