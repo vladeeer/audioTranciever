@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..common.params import pilotValue, nullValue, getModeParams, getModulationParams, getConsts
-from ..common.filter import lpFilter
+from ..common.filter import lpFilter, hpFilter
 from ..common.pilotGen import PilotGen
 from ..common.utils import *
 
@@ -11,6 +11,12 @@ class Receiver():
       getConsts(self)
       getModeParams(self, mode)
       getModulationParams(self, self.modulation)
+
+   def filterHp(self, samples):
+      nTaps = 32767
+      normFreq = (self.centerFreq - self.bw / 2) / (self.sampleRate * 0.5)
+      samples = hpFilter(samples, normFreq, nTaps)
+      return samples
 
    def iqAdc(self, modulatedSamples):
       modulatedSamples = modulatedSamples.astype(np.complex64)
@@ -42,7 +48,7 @@ class Receiver():
       pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
-
+      offset = 0
       maxInd0 = 0
       maxInd1 = 0
       while maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
@@ -51,7 +57,20 @@ class Receiver():
          corr1 = np.abs(np.correlate(s, pilotGen1.symbol, mode='valid'))
          maxInd0 = np.argmax(corr0)
          maxInd1 = np.argmax(corr1)
-         tdIqSamples = tdIqSamples[1:]
+         tdIqSamples = tdIqSamples[symbLen:]
+
+         if offset % 1 == 0:
+            plt.subplot(2, 1, 1)
+            plt.plot(corr0)
+            plt.subplot(2, 1, 2)
+            plt.plot(corr1)
+            plt.tight_layout()
+            plt.savefig(f"initialSyncCorr/offset_{offset}_symbols.png", dpi=300)
+            plt.close()
+         offset += 1
+
+         if len(tdIqSamples) < frameLen:
+            print('[ERROR] could not sync')
 
       initialSampleOffset = (np.argmax(corr0) + symbLen * 11 - 2) % frameLen 
       tdIqSamples = tdIqSamples[initialSampleOffset:]
@@ -244,26 +263,27 @@ class Receiver():
 
    def receive(self, tdSamples, nFrames):
       print("------------------------------------")
-      sinr_dB = 12
-      signalPower = np.mean((tdSamples.astype(np.int32))**2)
-      noisePower = signalPower / (10 ** (sinr_dB / 10))
-      print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
-      noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
-      tdSamples = tdSamples + noise
-      delay = 100
-      delayedSamples = np.pad(tdSamples, (delay, 0))
-      tdSamples = np.pad(tdSamples, (0, delay))
-      tdSamples = tdSamples + 0.7 * delayedSamples
-      tdSamples = np.pad(tdSamples, (62, 0))
-      print("------------------------------------")
+      # sinr_dB = 12
+      # signalPower = np.mean((tdSamples.astype(np.int32))**2)
+      # noisePower = signalPower / (10 ** (sinr_dB / 10))
+      # print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
+      # noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
+      # tdSamples = tdSamples + noise
+      # delay = 100
+      # delayedSamples = np.pad(tdSamples, (delay, 0))
+      # tdSamples = np.pad(tdSamples, (0, delay))
+      # tdSamples = tdSamples + 0.7 * delayedSamples
+      # tdSamples = np.pad(tdSamples, (62, 0))
+      # print("------------------------------------")
 
-      print("Demodulating baseband")
+      print("Filtering")
+      #tdSamples = self.filterHp(tdSamples)
+
+      print("Demodulating to baseband")
       tdIqSamples = self.iqAdc(tdSamples)
 
       print("Resampling")
       tdIqSamples = self.resample(tdIqSamples)
-
-      #tdIqSamples = tdIqSamples[(self.dftSize + self.cpLen)*11 - 10:]
 
       print("Sync Frames")
       tdIqSamples = self.sync(tdIqSamples, nFrames)
