@@ -93,3 +93,4 @@ def getConsts(self):
     self.nPilotSymmbolsPerFrame = 2
     self.dataSymbInd = np.array([0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13])
     self.pilotSymbInd = np.array([3, 10])
+    self.nSyncBufferSamples = 0

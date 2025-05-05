@@ -13,7 +13,7 @@ class Receiver():
       getModulationParams(self, self.modulation)
 
    def filterHp(self, samples):
-      nTaps = 32767
+      nTaps = 1023
       normFreq = (self.centerFreq - self.bw / 2) / (self.sampleRate * 0.5)
       samples = hpFilter(samples, normFreq, nTaps)
       return samples
@@ -48,7 +48,7 @@ class Receiver():
       pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
-      offset = 0
+      offset = -1
       maxInd0 = 0
       maxInd1 = 0
       while maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
@@ -57,9 +57,9 @@ class Receiver():
          corr1 = np.abs(np.correlate(s, pilotGen1.symbol, mode='valid'))
          maxInd0 = np.argmax(corr0)
          maxInd1 = np.argmax(corr1)
-         tdIqSamples = tdIqSamples[symbLen:]
+         tdIqSamples = tdIqSamples[1:]
 
-         if offset % 1 == 0:
+         if offset % 10 == 0:
             plt.subplot(2, 1, 1)
             plt.plot(corr0)
             plt.subplot(2, 1, 2)
@@ -72,18 +72,12 @@ class Receiver():
          if len(tdIqSamples) < frameLen:
             print('[ERROR] could not sync')
 
-      initialSampleOffset = (np.argmax(corr0) + symbLen * 11 - 2) % frameLen 
+      print(f'Sync detected at sample offset: {offset}')
+
+      initialSampleOffset = (np.argmax(corr0) + symbLen * 11 - self.nSyncBufferSamples) % frameLen 
       tdIqSamples = tdIqSamples[initialSampleOffset:]
 
-      lag1 = np.argmax(corr0)
-      corr0[lag1] = 0
-      lag2 = np.argmax(corr0)
-      corr0[lag2] = 0
-      lag3 = np.argmax(corr0)
-
-      print(f'lag1: {lag1}, lag2: {lag2}, lag3: {lag3}')
-
-      print(f'initialSampleOffset: {initialSampleOffset}')
+      print(f'initialSampleOffset: {initialSampleOffset + offset}')
       #plt.rcParams['agg.path.chunksize'] = 1000
       #plt.figure(figsize=(500, 0.5))
       plt.subplot(2, 1, 1)
@@ -94,21 +88,31 @@ class Receiver():
       plt.savefig("Autocor.png", dpi=300)
       plt.close()
 
-      desync_warning_shown = None
       syncedTdIqSamples = np.zeros(len(tdIqSamples), dtype=np.complex64)
       syncedTdIqSamples[:frameLen] = tdIqSamples[:frameLen]
       for frameIdx in range(1, nFrames):
-         s = tdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen]
-         corr0 = np.correlate(np.abs(s), np.abs(pilotGen0.symbol), mode='valid')
-         sampleOffset = 0  #np.argmax(corr0) - symbLen * 5
+         # First frame is previous!
+         s = tdIqSamples[frameLen : frameLen * 2]
 
-         if (desync_warning_shown is None and sampleOffset != 0):
-            print(f'[WARNING] Desync by {sampleOffset} at frame {frameIdx}')
-            desync_warning_shown = None
+         corr0 = np.abs(np.correlate(s, pilotGen0.symbol, mode='valid'))
+         corr1 = np.abs(np.correlate(s, pilotGen1.symbol, mode='valid'))
+         maxInd0 = np.argmax(corr0)
+         maxInd1 = np.argmax(corr1)
 
-         syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = \
-            tdIqSamples[frameIdx * frameLen + sampleOffset : (frameIdx + 1) * frameLen + sampleOffset]
+         if maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
+            print(f'frame: {frameIdx}, freerun')
+            syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen : frameLen * 2]
+         else:
+            if (maxInd0-self.nSyncBufferSamples == symbLen * 3 - 1) and (maxInd1-self.nSyncBufferSamples == symbLen * 10 - 1):
+               print(f'frame: {frameIdx}, no need to sync')
+               syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen : frameLen * 2]
+            else:
+               print(f'frame: {frameIdx}, maxInd0: {maxInd0-self.nSyncBufferSamples}({symbLen*3-1}), maxInd1: {maxInd1-self.nSyncBufferSamples}({symbLen*10-1})')
+               sampleOffset = np.argmax(corr0) - (symbLen * 3 + self.nSyncBufferSamples - 1)
+               print(sampleOffset)
+               syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen + sampleOffset : frameLen * 2 + sampleOffset]
 
+         tdIqSamples = tdIqSamples[frameLen:]
       return syncedTdIqSamples
 
    def detachCp(self, samples, nFrames):
@@ -182,7 +186,7 @@ class Receiver():
 
          combinedPilots[frameIdx * self.nSubcarriers : (frameIdx + 1) * self.nSubcarriers] = estimation
 
-         if frameIdx < 10:
+         if frameIdx % 10 == 0:
             plt.figure(figsize=(12, 6))
             plt.subplot(2, 1, 1)
             plt.plot(np.abs(estimation))
