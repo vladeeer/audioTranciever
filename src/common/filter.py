@@ -33,6 +33,8 @@ def calcHpFirTaps(normCutoff, nTaps):
    return taps
 
 def hpFilter(samples, normCutoff, nTaps):
+   groupDelay = (nTaps - 1) // 2
    taps = calcHpFirTaps(normCutoff, nTaps)
    filteredSamples = np.convolve(samples, taps, mode='same')
+   filteredSamples = filteredSamples[groupDelay:]
    return filteredSamples.astype(np.float32)

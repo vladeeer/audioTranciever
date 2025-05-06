@@ -48,26 +48,28 @@ class Receiver():
       pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
-      offset = -1
+      step = symbLen // 2
+      offset = 0
       maxInd0 = 0
       maxInd1 = 0
-      while maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
+      
+      while np.abs((maxInd1 - maxInd0) - (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen) > 2:
          s = tdIqSamples[:frameLen]
          corr0 = np.abs(np.correlate(s, pilotGen0.symbol, mode='valid'))
          corr1 = np.abs(np.correlate(s, pilotGen1.symbol, mode='valid'))
          maxInd0 = np.argmax(corr0)
          maxInd1 = np.argmax(corr1)
-         tdIqSamples = tdIqSamples[1:]
+         tdIqSamples = tdIqSamples[step:]
 
-         if offset % 10 == 0:
-            plt.subplot(2, 1, 1)
-            plt.plot(corr0)
-            plt.subplot(2, 1, 2)
-            plt.plot(corr1)
-            plt.tight_layout()
-            plt.savefig(f"initialSyncCorr/offset_{offset}_symbols.png", dpi=300)
-            plt.close()
-         offset += 1
+         plt.subplot(2, 1, 1)
+         plt.plot(corr0)
+         plt.subplot(2, 1, 2)
+         plt.plot(corr1)
+         plt.tight_layout()
+         plt.savefig(f"initialSyncCorr/offset_{offset}_samples.png", dpi=300)
+         plt.close()
+         offset += step
+         
 
          if len(tdIqSamples) < frameLen:
             print('[ERROR] could not sync')
@@ -99,20 +101,22 @@ class Receiver():
          maxInd0 = np.argmax(corr0)
          maxInd1 = np.argmax(corr1)
 
+         sampleOffset = 0
+         infoString = f'frame: {frameIdx}, maxInd0: {maxInd0-self.nSyncBufferSamples}({symbLen*3-1}), maxInd1: {maxInd1-self.nSyncBufferSamples}({symbLen*10-1})'
          if maxInd1 - maxInd0 != (self.pilotSymbInd[1] - self.pilotSymbInd[0]) * symbLen:
-            print(f'frame: {frameIdx}, freerun')
+            print(f'freerun         | {infoString}')
             syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen : frameLen * 2]
          else:
             if (maxInd0-self.nSyncBufferSamples == symbLen * 3 - 1) and (maxInd1-self.nSyncBufferSamples == symbLen * 10 - 1):
-               print(f'frame: {frameIdx}, no need to sync')
+               print(f'no need to sync | {infoString}')
                syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen : frameLen * 2]
             else:
-               print(f'frame: {frameIdx}, maxInd0: {maxInd0-self.nSyncBufferSamples}({symbLen*3-1}), maxInd1: {maxInd1-self.nSyncBufferSamples}({symbLen*10-1})')
-               sampleOffset = np.argmax(corr0) - (symbLen * 3 + self.nSyncBufferSamples - 1)
-               print(sampleOffset)
+               print(f'resync          | {infoString}')
+               sampleOffset = maxInd0 - (symbLen * 3 + self.nSyncBufferSamples - 1)
                syncedTdIqSamples[frameIdx * frameLen : (frameIdx + 1) * frameLen] = tdIqSamples[frameLen + sampleOffset : frameLen * 2 + sampleOffset]
 
-         tdIqSamples = tdIqSamples[frameLen:]
+         tdIqSamples = tdIqSamples[frameLen + sampleOffset:]
+
       return syncedTdIqSamples
 
    def detachCp(self, samples, nFrames):
@@ -140,7 +144,7 @@ class Receiver():
    def detachPilots(self, iqSamples, nFrames):
       assert len(iqSamples) % self.nSubcarriers == 0
       symbLen = self.nSubcarriers
-      pilotFrameLen = symbLen * self.nPilotSymmbolsPerFrame
+      pilotFrameLen = symbLen * self.nPilotSymbolsPerFrame
       dataFrameLen = symbLen * self.nDataSymbolsPerFrame
       frameLen = symbLen * self.nSymbolsPerFrame
 
@@ -162,43 +166,51 @@ class Receiver():
 
       return (dataFdIqSamples, pilotFdIqSamples)
 
+   def interpolateEstimation(self, phase0, phase1):
+      idxs = np.arange(self.nSymbolsPerFrame)
+      phase = np.interp(idxs, self.pilotSymbInd, (phase0, phase1))
+      phase = np.delete(phase, self.pilotSymbInd)
+      return phase
+
    def estimateChannel(self, pilotFdIqSamples, nFrames):
       symbLen = self.nSubcarriers
-      pilotFrameLen = symbLen * self.nPilotSymmbolsPerFrame
+      pilotFrameLen = symbLen * self.nPilotSymbolsPerFrame
+      dataFrameLen = symbLen * self.nDataSymbolsPerFrame
 
       pilotGen0 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 0)
       pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
 
-      combinedPilots = np.zeros(nFrames * symbLen, dtype=np.complex64)
+      estimatedFrames = np.zeros(nFrames * dataFrameLen, dtype=np.complex64)
       for frameIdx in range(nFrames):
          estimation0 = pilotFdIqSamples[frameIdx * pilotFrameLen : frameIdx * pilotFrameLen + symbLen]
-         estimation0 /= pilotGen0.fdSymb[:]
-         phase0 = np.angle(estimation0)
-         amp0 = np.abs(estimation0)
          estimation1 = pilotFdIqSamples[frameIdx * pilotFrameLen + symbLen : frameIdx * pilotFrameLen + 2 * symbLen]
+         estimation0 /= pilotGen0.fdSymb[:]
          estimation1 /= pilotGen1.fdSymb[:]
-         phase1 = np.angle(estimation1)
-         amp1 = np.abs(estimation1)
 
-         amp = 0.5 * (amp0 + amp1)
-         phase = 0.5 * (phase0 + phase1)
-         estimation = estimation0 #np.array(amp * (np.cos(phase) + 1j * np.sin(phase)), dtype = np.complex64)
+         frameEstimation = np.zeros((symbLen, self.nDataSymbolsPerFrame), dtype=np.complex64)
+         for subcIdx in range(self.nSubcarriers):
+            subcEstimation0 = estimation0[subcIdx]
+            subcEstimation1 = estimation1[subcIdx]
+            subcEstimation = self.interpolateEstimation(subcEstimation0, subcEstimation1)
+            frameEstimation[subcIdx][:] = subcEstimation[:]
+         
+         frameEstimation = np.transpose(frameEstimation).flatten()
 
-         combinedPilots[frameIdx * self.nSubcarriers : (frameIdx + 1) * self.nSubcarriers] = estimation
+         estimatedFrames[frameIdx * dataFrameLen : (frameIdx + 1) * dataFrameLen] = frameEstimation
 
-         if frameIdx % 10 == 0:
+         if frameIdx % 5 == 0:
             plt.figure(figsize=(12, 6))
             plt.subplot(2, 1, 1)
-            plt.plot(np.abs(estimation))
-            plt.xlim(0, len(estimation))
+            plt.plot(np.abs(frameEstimation[symbLen:symbLen*2]))
+            plt.xlim(0, len(frameEstimation[symbLen:symbLen*2]))
             plt.title('Amplitude (Magnitude)')
             plt.xlabel('Index')
             plt.ylabel('Amplitude')
 
             plt.subplot(2, 1, 2)
-            plt.plot(np.angle(estimation))
+            plt.plot(np.angle(frameEstimation[symbLen:symbLen*2]))
             plt.ylim(-np.pi, np.pi)
-            plt.xlim(0, len(estimation))
+            plt.xlim(0, len(frameEstimation[symbLen:symbLen*2]))
             plt.title('Phase (Angle)')
             plt.xlabel('Index')
             plt.ylabel('Phase (radians)')
@@ -206,11 +218,11 @@ class Receiver():
             plt.tight_layout()
             plt.savefig(f"channelEstimate/Frame_{frameIdx}.png")
             plt.close()
-      return combinedPilots
+      return estimatedFrames
 
-   def equalizeSample(self, iqSample, channelEstimate):
-      epsilon = 0.000000001
-      iqSample = iqSample / (channelEstimate + np.complex64(epsilon, 0))
+   def equalizeDemodSample(self, iqSample, channelEstimate):
+      epsilon = 0.00001
+      iqSample = iqSample / (channelEstimate + iqSample * epsilon)
       self.iqData.append(iqSample)
       minD = np.abs(iqSample - self.modulationMap[0])
       val = 0
@@ -226,9 +238,11 @@ class Receiver():
       demapedBytes = np.zeros(len(dataIqSamples), dtype=np.int16)
       dataIdx = 0
       for frameIdx in range(nFrames):
-         for symboldIdx in range(self.nDataSymbolsPerFrame):
+         for symbIdx in range(self.nDataSymbolsPerFrame):
             for subcIdx in range(self.nSubcarriers):
-               demapedSample = self.equalizeSample(dataIqSamples[dataIdx], channelEstimates[frameIdx * self.nSubcarriers + subcIdx])
+               dataIqSample = dataIqSamples[frameIdx * self.nSubcarriers * self.nDataSymbolsPerFrame + symbIdx * self.nSubcarriers + subcIdx]
+               channelEstimate = channelEstimates[frameIdx * self.nSubcarriers * self.nDataSymbolsPerFrame + symbIdx * self.nSubcarriers + subcIdx]
+               demapedSample = self.equalizeDemodSample(dataIqSample, channelEstimate)
                demapedBytes[dataIdx] = demapedSample
                dataIdx += 1
       return demapedBytes

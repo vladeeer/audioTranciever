@@ -40,7 +40,7 @@ def plotSignedSamples(w, h, samples, path, sampleRate = None):
 
 def plotStarmap(iqSamples, path):
    plt.figure(figsize=(8, 8))
-   plt.scatter(np.real(iqSamples), np.imag(iqSamples), alpha=0.25)
+   plt.scatter(np.real(iqSamples), np.imag(iqSamples), alpha=0.01)
    plt.title('IQ Samples')
    plt.xlabel('I')
    plt.ylabel('Q')

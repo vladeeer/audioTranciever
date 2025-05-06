@@ -69,7 +69,7 @@ def getModeParams(self, mode):
             self.audioSamplesPerSymbol = 64
 
     self.dftSize = self.nSubcarriers + self.nNullSubcarriers
-    self.nSymbolsPerFrame = self.nDataSymbolsPerFrame + self.nPilotSymmbolsPerFrame
+    self.nSymbolsPerFrame = self.nDataSymbolsPerFrame + self.nPilotSymbolsPerFrame
     self.audioSamplesPerFrame = self.nDataSymbolsPerFrame * self.audioSamplesPerSymbol
 
 def getModulationParams(self, modulation):
@@ -88,9 +88,9 @@ def getConsts(self):
     self.centerFreq = 9000
     self.sampleRate = 44100 # = 14700 * 3
     self.resamplingFactor = 3
-    self.cpLen = 256 # approx 17ms of echo or 6m of distance delta 
+    self.cpLen = 512 # approx 17ms of echo or 6m of distance delta 
     self.nDataSymbolsPerFrame = 12
-    self.nPilotSymmbolsPerFrame = 2
+    self.nPilotSymbolsPerFrame = 2
     self.dataSymbInd = np.array([0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13])
     self.pilotSymbInd = np.array([3, 10])
-    self.nSyncBufferSamples = 0
+    self.nSyncBufferSamples = 100
