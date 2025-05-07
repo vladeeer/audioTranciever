@@ -279,6 +279,29 @@ class Receiver():
          samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)] = symbolSamples
       return samples.view(np.int16)
 
+   def deinterleave(self, samples):
+      audioSamplesPerFrame = self.audioSamplesPerSymbol * self.nDataSymbolsPerFrame
+      assert len(samples) % audioSamplesPerFrame == 0
+      nFrames = len(samples) // audioSamplesPerFrame
+      bytesPerSample = 2
+      bitsPerSample = bytesPerSample * 8
+
+      masksForByte = (1 << np.arange(7, -1, -1, dtype=np.uint8))
+      masksForFrame = np.tile(masksForByte, audioSamplesPerFrame * bytesPerSample)
+      for frameIdx in range(nFrames):
+         frameBits = np.ndarray(self.nDataSymbolsPerFrame * self.audioSamplesPerSymbol * bitsPerSample, dtype=np.uint8)
+ 
+         frameBytes = samples[frameIdx * audioSamplesPerFrame : (frameIdx + 1) * audioSamplesPerFrame].view(np.uint8)
+         frameBytes = np.repeat(frameBytes, 8)
+         frameBits = (frameBytes & masksForFrame) > 0
+         #print(f'{frameBits.shape} {Bits.shape} {horizBytes.shape} {masksForHoriz.shape}')
+         frameBits = frameBits.reshape(self.audioSamplesPerSymbol * bitsPerSample, self.nDataSymbolsPerFrame)
+         
+         frameBytes = np.packbits(frameBits.transpose().flatten())
+         samples[frameIdx * audioSamplesPerFrame : (frameIdx + 1) * audioSamplesPerFrame] = frameBytes.view(np.int16)
+
+      return samples
+
    def receive(self, tdSamples, nFrames):
       print("------------------------------------")
       # sinr_dB = 12
@@ -333,6 +356,9 @@ class Receiver():
 
       print("Descrambling")
       samples = self.descramble(samples)
+
+      print("Deinterleaving")
+      samples = self.deinterleave(samples)
 
       return samples
 

@@ -31,6 +31,30 @@ class Transmitter():
 
       return samples
 
+   def interleave(self, samples):
+      audioSamplesPerFrame = self.audioSamplesPerSymbol * self.nDataSymbolsPerFrame
+      assert len(samples) % audioSamplesPerFrame == 0
+      nFrames = len(samples) // audioSamplesPerFrame
+      bytesPerSample = 2
+      bitsPerSample = bytesPerSample * 8
+
+      masksForByte = (1 << np.arange(7, -1, -1, dtype=np.uint8))
+      masksForSymbol = np.tile(masksForByte, self.audioSamplesPerSymbol * bytesPerSample)
+      for frameIdx in range(nFrames):
+         frameBits = np.ndarray((self.nDataSymbolsPerFrame, self.audioSamplesPerSymbol * bitsPerSample), dtype=np.uint8)
+         for symbIdx in range(self.nDataSymbolsPerFrame):
+            symbolBytes = samples[frameIdx * audioSamplesPerFrame + symbIdx * self.audioSamplesPerSymbol : \
+                                  frameIdx * audioSamplesPerFrame + (symbIdx + 1) * self.audioSamplesPerSymbol].view(np.uint8)
+            symbolBytes = np.repeat(symbolBytes, 8)
+            symbolBits = (symbolBytes & masksForSymbol) > 0
+            frameBits[symbIdx][:] = symbolBits[:]
+
+         frameBytes = np.packbits(frameBits.transpose().flatten())
+         samples[frameIdx * audioSamplesPerFrame : (frameIdx + 1) * audioSamplesPerFrame] = frameBytes.view(np.int16)
+
+      return samples
+
+
    def mapSamplesToQPSK(self, samples):
       iqSamplesPerSample = 16 // self.bitsPerElement
       iqSamples = np.zeros(iqSamplesPerSample * len(samples), dtype=np.complex64)
@@ -77,7 +101,7 @@ class Transmitter():
       pilotGen0 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 0)
       pilotGen1 = PilotGen(self.nSubcarriers, self.nNullSubcarriers, self.cpLen, 1)
 
-      tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen * self.nPilotSymmbolsPerFrame, dtype=np.complex64)
+      tdIqSamplesWithPilotSymb = np.zeros(len(tdIqSamples) + nFrames * symbLen * self.nPilotSymbolsPerFrame, dtype=np.complex64)
 
       for frameIdx in range(nFrames):
          dataSymbIdx = 0
@@ -126,8 +150,11 @@ class Transmitter():
       print("Adding padding")
       paddedSamples = self.pad(samples)
 
+      print("Interleaving")
+      interleavedSamples = self.interleave(paddedSamples)
+
       print("Scrambling")
-      scrambledSamples = self.scramble(paddedSamples)
+      scrambledSamples = self.scramble(interleavedSamples)
 
       print("Mapping samples")
       iqDataSamples = self.mapSamplesToQPSK(scrambledSamples)
