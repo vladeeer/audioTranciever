@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from ..common.params import nullValue, getModeParams, getModulationParams, getConsts
 from ..common.filter import lpFilter
 from ..common.pilotGen import PilotGen
+from ..common.coder import Coder
 
 class Transmitter():
    def __init__(self, mode):
@@ -16,20 +17,12 @@ class Transmitter():
       suffixLen = (samplesPerFrame - (len(samples) % samplesPerFrame)) % samplesPerFrame
       return np.pad(samples, (0, suffixLen))
 
-   def scramble(self, samples):
-      assert len(samples) % self.audioSamplesPerSymbol == 0
-      nSymbols = len(samples) // self.audioSamplesPerSymbol
-
-      n = np.arange(self.audioSamplesPerSymbol)
-      seq = (534534512311 * n + 1984).astype(np.uint16)
-      for symbIdx in range(nSymbols):
-         symbolSamples = samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)].view(np.uint16)
-         symbolSamples = (symbolSamples << 5) | (symbolSamples >> (16 - 5)) # Apply cyclic shift before and after xor
-         symbolSamples = symbolSamples ^ seq
-         symbolSamples = (symbolSamples >> 3) | (symbolSamples << (16 - 3))
-         samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)] = symbolSamples
-
-      return samples
+   def encode(self, samples):
+      if self.codeRateInverse > 1:
+         coder = Coder(self.codeRateInverse)
+         return coder.encode(samples)
+      else:
+         return samples
 
    def interleave(self, samples):
       audioSamplesPerFrame = self.audioSamplesPerSymbol * self.nDataSymbolsPerFrame
@@ -54,6 +47,20 @@ class Transmitter():
 
       return samples
 
+   def scramble(self, samples):
+      assert len(samples) % self.audioSamplesPerSymbol == 0
+      nSymbols = len(samples) // self.audioSamplesPerSymbol
+
+      n = np.arange(self.audioSamplesPerSymbol)
+      seq = (534534512311 * n + 1984).astype(np.uint16)
+      for symbIdx in range(nSymbols):
+         symbolSamples = samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)].view(np.uint16)
+         symbolSamples = (symbolSamples << 5) | (symbolSamples >> (16 - 5)) # Apply cyclic shift before and after xor
+         symbolSamples = symbolSamples ^ seq
+         symbolSamples = (symbolSamples >> 3) | (symbolSamples << (16 - 3))
+         samples[self.audioSamplesPerSymbol * symbIdx : self.audioSamplesPerSymbol * (symbIdx + 1)] = symbolSamples
+
+      return samples
 
    def mapSamplesToQPSK(self, samples):
       iqSamplesPerSample = 16 // self.bitsPerElement
@@ -150,8 +157,11 @@ class Transmitter():
       print("Adding padding")
       paddedSamples = self.pad(samples)
 
+      print("Coding")
+      codedSamples = self.encode(paddedSamples)
+
       print("Interleaving")
-      interleavedSamples = self.interleave(paddedSamples)
+      interleavedSamples = self.interleave(codedSamples)
 
       print("Scrambling")
       scrambledSamples = self.scramble(interleavedSamples)

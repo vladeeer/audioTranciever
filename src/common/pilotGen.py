@@ -16,9 +16,9 @@ class PilotGen:
 
    def getRand(self, n):
       if self.pilotIdx == 0:
-         return np.abs((n + 1984) ** 3 + 345) % 1234
+         return np.abs((n + 19841984) ** 3 + 34556) % 123456
       elif self.pilotIdx == 1:
-         return np.abs((n + 1234) ** 3 + 643) % 1236
+         return np.abs((n + 12345678) ** 3 + 64336) % 123679
 
    def genFdIq(self):
       mult = 1 / (np.abs(pilotValue))

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from ..common.params import pilotValue, nullValue, getModeParams, getModulationParams, getConsts
 from ..common.filter import lpFilter, hpFilter
 from ..common.pilotGen import PilotGen
+from ..common.coder import Coder
 from ..common.utils import *
 
 class Receiver():
@@ -49,7 +50,7 @@ class Receiver():
       symbLen = self.dftSize + self.cpLen
       frameLen = symbLen * self.nSymbolsPerFrame
       step = symbLen // 2
-      offset = 0
+      offset = -step
       maxInd0 = 0
       maxInd1 = 0
       
@@ -61,6 +62,7 @@ class Receiver():
          maxInd1 = np.argmax(corr1)
          tdIqSamples = tdIqSamples[step:]
 
+         offset += step
          plt.subplot(2, 1, 1)
          plt.plot(corr0)
          plt.subplot(2, 1, 2)
@@ -68,7 +70,7 @@ class Receiver():
          plt.tight_layout()
          plt.savefig(f"initialSyncCorr/offset_{offset}_samples.png", dpi=300)
          plt.close()
-         offset += step
+         
          
 
          if len(tdIqSamples) < frameLen:
@@ -76,7 +78,7 @@ class Receiver():
 
       print(f'Sync detected at sample offset: {offset}')
 
-      initialSampleOffset = (np.argmax(corr0) + symbLen * 11 - self.nSyncBufferSamples) % frameLen 
+      initialSampleOffset = (frameLen + maxInd0 + symbLen * 11 - self.nSyncBufferSamples + 1 - step) % frameLen
       tdIqSamples = tdIqSamples[initialSampleOffset:]
 
       print(f'initialSampleOffset: {initialSampleOffset + offset}')
@@ -302,23 +304,30 @@ class Receiver():
 
       return samples
 
+   def decode(self, samples):
+      if self.codeRateInverse > 1:
+         coder = Coder(self.codeRateInverse)
+         return coder.decode(samples)
+      else:
+         return samples
+
    def receive(self, tdSamples, nFrames):
       print("------------------------------------")
-      # sinr_dB = 12
-      # signalPower = np.mean((tdSamples.astype(np.int32))**2)
-      # noisePower = signalPower / (10 ** (sinr_dB / 10))
-      # print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
-      # noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
-      # tdSamples = tdSamples + noise
-      # delay = 100
-      # delayedSamples = np.pad(tdSamples, (delay, 0))
-      # tdSamples = np.pad(tdSamples, (0, delay))
-      # tdSamples = tdSamples + 0.7 * delayedSamples
-      # tdSamples = np.pad(tdSamples, (62, 0))
-      # print("------------------------------------")
+      sinr_dB = 9
+      signalPower = np.mean((tdSamples.astype(np.int32))**2)
+      noisePower = signalPower / (10 ** (sinr_dB / 10))
+      print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
+      noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
+      tdSamples = tdSamples + noise
+      delay = 100
+      delayedSamples = np.pad(tdSamples, (delay, 0))
+      tdSamples = np.pad(tdSamples, (0, delay))
+      tdSamples = tdSamples + 0.7 * delayedSamples
+      tdSamples = np.pad(tdSamples, (62, 0))
+      print("------------------------------------")
 
       print("Filtering")
-      #tdSamples = self.filterHp(tdSamples)
+      tdSamples = self.filterHp(tdSamples)
 
       print("Demodulating to baseband")
       tdIqSamples = self.iqAdc(tdSamples)
@@ -359,6 +368,9 @@ class Receiver():
 
       print("Deinterleaving")
       samples = self.deinterleave(samples)
+
+      print("Decoding")
+      samples = self.decode(samples)
 
       return samples
 
