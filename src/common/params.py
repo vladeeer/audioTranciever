@@ -67,7 +67,7 @@ def getModeParams(self, mode):
             self.nSubcarriers = 1024
             self.nNullSubcarriers = 1
             self.audioSamplesPerSymbol = 128
-            self.codeRateInverse = 2
+            self.codeRateInverse = 4
 
     self.dftSize = self.nSubcarriers + self.nNullSubcarriers
     self.nSymbolsPerFrame = self.nDataSymbolsPerFrame + self.nPilotSymbolsPerFrame
@@ -94,4 +94,4 @@ def getConsts(self):
     self.nPilotSymbolsPerFrame = 2
     self.dataSymbInd = np.array([0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13])
     self.pilotSymbInd = np.array([3, 10])
-    self.nSyncBufferSamples = 100
+    self.nSyncBufferSamples = 5

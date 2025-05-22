@@ -2,11 +2,11 @@
 
 import numpy as np
 
-genPolynomialsList = [[0b1111, 0b1011],                  \
-                      [0b1111, 0b1011, 0b1101],          \
-                      [0b1111, 0b1110, 0b1101, 0b1011]]
+genPolynomialsList = [[0b1101, 0b1111],                  \
+                      [0b1011, 0b1101, 0b1111],          \
+                      [0b1011, 0b1101, 0b1101, 0b1111]]
 
-def getOnes(n):
+def maskBits(n):
    s = np.uint8(1)
    for i in range(n-1):
       s = (s << 1) + 1
@@ -21,7 +21,7 @@ class Coder:
    def encode(self, samples):
       bits = np.unpackbits(samples.view(np.uint8))
       
-      mask = getOnes(self.constraintLength)
+      mask = maskBits(self.constraintLength)
       state = 0
       encodedBits = np.empty(self.nGenerators * len(bits), dtype=np.uint8)
       for i in range(len(bits)):
@@ -47,7 +47,7 @@ class Coder:
 
       nextState = np.zeros((nStates, 2), dtype=np.uint8)
       outputBits = np.zeros((nStates, 2, self.nGenerators), dtype=np.uint8)
-      mask = getOnes(self.constraintLength)
+      mask = maskBits(self.constraintLength)
       for state in range(nStates):
          for bit in [0, 1]:
                s = ((state << 1) | bit) & mask

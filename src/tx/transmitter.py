@@ -169,7 +169,7 @@ class Transmitter():
       print("Mapping samples")
       iqDataSamples = self.mapSamplesToQPSK(scrambledSamples)
 
-      print("Calculalating OFDM IQ samples")
+      print("Mapping to symbols & inserting CP")
       tdIqSamples, nMixedSymbols = self.mapToSymbIFFTcp(iqDataSamples)
       nFrames = nMixedSymbols // self.nDataSymbolsPerFrame
 

@@ -35,6 +35,8 @@ def plotSignedSamples(w, h, samples, path, sampleRate = None):
       axes.xaxis.set_major_formatter(ticker.NullFormatter())
 
    plt.grid(True, axis="y", color="w")
+   plt.xlabel('Время, минуты:секунды')
+   plt.ylabel('Уровень, дБ')
    plt.savefig(path)
    plt.close()
 

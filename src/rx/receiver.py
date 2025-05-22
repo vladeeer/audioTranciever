@@ -65,8 +65,10 @@ class Receiver():
          offset += step
          plt.subplot(2, 1, 1)
          plt.plot(corr0)
+         plt.gca().set_title('Корреляция с первым пилотом')
          plt.subplot(2, 1, 2)
          plt.plot(corr1)
+         plt.gca().set_title('Корреляция со вторым пилотом')
          plt.tight_layout()
          plt.savefig(f"initialSyncCorr/offset_{offset}_samples.png", dpi=300)
          plt.close()
@@ -313,18 +315,18 @@ class Receiver():
 
    def receive(self, tdSamples, nFrames):
       print("------------------------------------")
-      sinr_dB = 9
-      signalPower = np.mean((tdSamples.astype(np.int32))**2)
-      noisePower = signalPower / (10 ** (sinr_dB / 10))
-      print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
-      noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
-      tdSamples = tdSamples + noise
-      delay = 100
-      delayedSamples = np.pad(tdSamples, (delay, 0))
-      tdSamples = np.pad(tdSamples, (0, delay))
-      tdSamples = tdSamples + 0.7 * delayedSamples
-      tdSamples = np.pad(tdSamples, (62, 0))
-      print("------------------------------------")
+      # sinr_dB = 10
+      # signalPower = np.mean((tdSamples.astype(np.int32))**2)
+      # noisePower = signalPower / (10 ** (sinr_dB / 10))
+      # print(f'SINR: {sinr_dB} dB, signalPower: {signalPower}, noisePower: {noisePower}')
+      # noise = np.sqrt(noisePower) * np.random.randn(len(tdSamples))
+      # tdSamples = tdSamples + noise
+      # delay = 441 # ms
+      # delayedSamples = np.pad(tdSamples, (delay, 0))
+      # tdSamples = np.pad(tdSamples, (0, delay))
+      # tdSamples = tdSamples + 0.5 * delayedSamples
+      # tdSamples = np.pad(tdSamples, (62, 0))
+      # print("------------------------------------")
 
       print("Filtering")
       tdSamples = self.filterHp(tdSamples)

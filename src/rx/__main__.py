@@ -21,7 +21,7 @@ def main():
    parser.add_argument("-f" ,"--output-frame-rate", type=int, default=44100,
                        help="Framerate of output .wav file")
    parser.add_argument("-m" ,"--mode", type=int, default=8, #choices=range(0, 9),
-                       help="Selects number of subcarriers, modulation type (BPSK or QPSK) and number of pilots")
+                       help="Modulation type (BPSK or QPSK) and code rate")
    parser.add_argument("-n" ,"--num-frames", type=int, required=True,
                        help="Number of frames to listen for")
    
